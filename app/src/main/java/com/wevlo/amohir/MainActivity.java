@@ -1,27 +1,19 @@
 package com.wevlo.amohir;
 
-import android.Manifest;
-import android.annotation.SuppressLint;
 import android.app.AlertDialog;
-import android.content.Context;
+import android.content.Intent;
 import android.content.SharedPreferences;
-import android.content.pm.PackageManager;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
-import android.media.AudioManager;
 import android.net.Uri;
 import android.os.Bundle;
-import android.os.Handler;
-import android.os.Looper;
+import android.text.Editable;
+import android.text.TextWatcher;
 import android.util.Base64;
-import android.view.Gravity;
-import android.view.MotionEvent;
 import android.view.View;
-import android.view.ViewGroup;
-import android.widget.Button;
 import android.widget.EditText;
 import android.widget.FrameLayout;
-import android.widget.GridLayout;
+import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 import android.widget.Toast;
@@ -29,89 +21,65 @@ import android.widget.Toast;
 import androidx.activity.result.ActivityResultLauncher;
 import androidx.activity.result.contract.ActivityResultContracts;
 import androidx.appcompat.app.AppCompatActivity;
-import androidx.core.content.ContextCompat;
-import androidx.core.content.FileProvider;
 import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
 
+import com.google.android.material.tabs.TabLayout;
 import com.google.firebase.FirebaseApp;
 import com.google.firebase.FirebaseOptions;
 import com.google.firebase.auth.FirebaseAuth;
 import com.google.firebase.auth.FirebaseUser;
-import com.google.firebase.firestore.DocumentChange;
-import com.google.firebase.firestore.DocumentReference;
 import com.google.firebase.firestore.DocumentSnapshot;
-import com.google.firebase.firestore.FieldValue;
 import com.google.firebase.firestore.FirebaseFirestore;
-import com.google.firebase.firestore.ListenerRegistration;
 import com.google.firebase.firestore.Query;
-
-import org.webrtc.EglBase;
-import org.webrtc.IceCandidate;
-import org.webrtc.PeerConnection;
-import org.webrtc.SurfaceViewRenderer;
-import org.webrtc.VideoTrack;
+import com.google.firebase.firestore.SetOptions;
 
 import java.io.ByteArrayOutputStream;
-import java.io.File;
 import java.io.InputStream;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 
 public class MainActivity extends AppCompatActivity {
 
-    private static final String[] EMOJIS = {
-            "😀","🥰","😘","😍","😊","🤩","🌸","💖","🎀","🥺",
-            "✨","🐱","🐰","👍","👏","🙌","🙏","🎉","🎂","⭐",
-            "🍓","🍭","🍫","🥳","🌹"
-    };
-
     private FirebaseAuth auth;
     private FirebaseFirestore db;
     private FirebaseUser currentUser;
-    private String myName;
+    private String myName, myAbout, myAvatarBase64;
 
-    private TextView tvHeaderName, tvCallerName, tvCallType, tvActiveTarget, tvCallTimer;
-    private EditText etMessage;
-    private RecyclerView rvMessages;
-    private MessageAdapter adapter;
-    private final List<MessageModel> messageList = new ArrayList<>();
+    private TextView tvAppTitle, tvCallerName, tvCallType;
+    private EditText etSearch;
+    private TabLayout tabLayout;
+    private RecyclerView rvChats, rvStatuses, rvCalls;
+    private LinearLayout statusContainer;
+    private FrameLayout incomingOverlay;
 
-    private FrameLayout incomingOverlay, callOverlay;
-    private LinearLayout callTopBar, callBottomBar;
-    private Button btnMaximize, btnMic, btnCam, btnSpeaker;
-    private SurfaceViewRenderer remoteVideoView, localVideoView;
+    private final List<UserModel> allUsers = new ArrayList<>();
+    private final List<UserModel> filteredUsers = new ArrayList<>();
+    private UserAdapter userAdapter;
 
-    private EglBase eglBase;
-    private WebRTCManager webRTCManager;
-    private AudioManager audioManager;
+    private final List<StatusModel> statusList = new ArrayList<>();
+    private StatusAdapter statusAdapter;
 
-    private String activeCallType = "video";
-    private boolean isMuted = false, isCamOff = false, isSpeakerOn = true;
-    private boolean hasRemoteSdp = false;
-    private boolean isCallerCurrent = false;
-    private long callStartTime = 0;
-    private final Handler timerHandler = new Handler(Looper.getMainLooper());
-    private Runnable timerRunnable;
+    private final List<CallLogModel> callList = new ArrayList<>();
+    private CallLogAdapter callAdapter;
 
-    private ListenerRegistration callDocListener, candidatesListener;
-    private Uri cameraImageUri;
+    private boolean isPickingAvatar = false;
 
-    private final ActivityResultLauncher<String[]> permissionLauncher =
-            registerForActivityResult(new ActivityResultContracts.RequestMultiplePermissions(), result -> {});
-
-    private final ActivityResultLauncher<String> galleryLauncher =
+    private final ActivityResultLauncher<String> imagePickerLauncher =
             registerForActivityResult(new ActivityResultContracts.GetContent(), uri -> {
-                if (uri != null) processAndSendImage(uri);
-            });
-
-    private final ActivityResultLauncher<Uri> cameraLauncher =
-            registerForActivityResult(new ActivityResultContracts.TakePicture(), success -> {
-                if (Boolean.TRUE.equals(success) && cameraImageUri != null) {
-                    processAndSendImage(cameraImageUri);
+                if (uri != null) {
+                    String b64 = compressUriToBase64(uri);
+                    if (b64 != null) {
+                        if (isPickingAvatar) {
+                            myAvatarBase64 = b64;
+                            saveProfileToPrefsAndFirestore();
+                            Toast.makeText(this, "Profile photo updated!", Toast.LENGTH_SHORT).show();
+                        } else {
+                            postStatusToFirestore("", b64);
+                        }
+                    }
                 }
             });
 
@@ -122,9 +90,7 @@ public class MainActivity extends AppCompatActivity {
 
         initFirebase();
         initViews();
-        initWebRTCViews();
-        setupDraggableLocalView();
-        initUserAndAuth();
+        initAuth();
     }
 
     private void initFirebase() {
@@ -143,512 +109,354 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void initViews() {
-        tvHeaderName = findViewById(R.id.tvHeaderName);
-        etMessage = findViewById(R.id.etMessage);
-        rvMessages = findViewById(R.id.rvMessages);
-
+        tvAppTitle = findViewById(R.id.tvAppTitle);
+        etSearch = findViewById(R.id.etSearch);
+        tabLayout = findViewById(R.id.tabLayout);
+        rvChats = findViewById(R.id.rvChats);
+        rvStatuses = findViewById(R.id.rvStatuses);
+        rvCalls = findViewById(R.id.rvCalls);
+        statusContainer = findViewById(R.id.statusContainer);
         incomingOverlay = findViewById(R.id.incomingOverlay);
         tvCallerName = findViewById(R.id.tvCallerName);
         tvCallType = findViewById(R.id.tvCallType);
 
-        callOverlay = findViewById(R.id.callOverlay);
-        callTopBar = findViewById(R.id.callTopBar);
-        callBottomBar = findViewById(R.id.callBottomBar);
-        tvActiveTarget = findViewById(R.id.tvActiveTarget);
-        tvCallTimer = findViewById(R.id.tvCallTimer);
-        btnMaximize = findViewById(R.id.btnMaximize);
-        btnMic = findViewById(R.id.btnMic);
-        btnCam = findViewById(R.id.btnCam);
-        btnSpeaker = findViewById(R.id.btnSpeaker);
+        tabLayout.addTab(tabLayout.newTab().setText("CHATS"));
+        tabLayout.addTab(tabLayout.newTab().setText("STATUS"));
+        tabLayout.addTab(tabLayout.newTab().setText("CALLS"));
 
-        adapter = new MessageAdapter(messageList, null);
-        rvMessages.setLayoutManager(new LinearLayoutManager(this));
-        rvMessages.setAdapter(adapter);
-
-        findViewById(R.id.btnProfile).setOnClickListener(v -> showNameDialog());
-        findViewById(R.id.btnHelp).setOnClickListener(v -> showHelpDialog());
-        findViewById(R.id.btnSend).setOnClickListener(v -> sendTextMessage());
-        findViewById(R.id.btnEmoji).setOnClickListener(v -> showEmojiDialog());
-        findViewById(R.id.btnAttach).setOnClickListener(v -> showAttachDialog());
-
-        findViewById(R.id.btnAudioCall).setOnClickListener(v -> checkPermissionsAndStartCall("audio"));
-        findViewById(R.id.btnVideoCall).setOnClickListener(v -> checkPermissionsAndStartCall("video"));
-
-        findViewById(R.id.btnSwitchCam).setOnClickListener(v -> {
-            if (webRTCManager != null) webRTCManager.switchCamera();
+        userAdapter = new UserAdapter(filteredUsers, user -> {
+            Intent i = new Intent(MainActivity.this, ChatActivity.class);
+            i.putExtra("peerUid", user.getUid());
+            i.putExtra("peerName", user.getName());
+            i.putExtra("isGlobal", user.isGlobalRoom());
+            startActivity(i);
         });
-        findViewById(R.id.btnHangup).setOnClickListener(v -> hangupCall(true));
-        findViewById(R.id.btnMinimize).setOnClickListener(v -> minimizeCallUI(true));
-        btnMaximize.setOnClickListener(v -> minimizeCallUI(false));
+        rvChats.setLayoutManager(new LinearLayoutManager(this));
+        rvChats.setAdapter(userAdapter);
 
-        btnMic.setOnClickListener(v -> {
-            isMuted = !isMuted;
-            if (webRTCManager != null) webRTCManager.setMicEnabled(!isMuted);
-            btnMic.setText(isMuted ? "🔇" : "🎤");
-        });
+        statusAdapter = new StatusAdapter(statusList, this::viewStatusDialog);
+        rvStatuses.setLayoutManager(new LinearLayoutManager(this));
+        rvStatuses.setAdapter(statusAdapter);
 
-        btnCam.setOnClickListener(v -> {
-            if ("audio".equals(activeCallType)) return;
-            isCamOff = !isCamOff;
-            if (webRTCManager != null) webRTCManager.setCamEnabled(!isCamOff);
-            btnCam.setText(isCamOff ? "🚫" : "📷");
-        });
+        callAdapter = new CallLogAdapter(callList, null);
+        rvCalls.setLayoutManager(new LinearLayoutManager(this));
+        rvCalls.setAdapter(callAdapter);
 
-        btnSpeaker.setOnClickListener(v -> {
-            isSpeakerOn = !isSpeakerOn;
-            if (audioManager != null) audioManager.setSpeakerphoneOn(isSpeakerOn);
-            btnSpeaker.setText(isSpeakerOn ? "🔊" : "🔈");
-        });
-    }
-
-    private void initWebRTCViews() {
-        audioManager = (AudioManager) getSystemService(Context.AUDIO_SERVICE);
-        eglBase = EglBase.create();
-
-        remoteVideoView = findViewById(R.id.remoteVideoView);
-        remoteVideoView.init(eglBase.getEglBaseContext(), null);
-        remoteVideoView.setEnableHardwareScaler(true);
-
-        localVideoView = findViewById(R.id.localVideoView);
-        localVideoView.init(eglBase.getEglBaseContext(), null);
-        localVideoView.setMirror(true);
-        localVideoView.setZOrderMediaOverlay(true);
-
-        webRTCManager = new WebRTCManager(this, eglBase, new WebRTCManager.Callback() {
+        tabLayout.addOnTabSelectedListener(new TabLayout.OnTabSelectedListener() {
             @Override
-            public void onIceCandidateGenerated(IceCandidate candidate) {
-                String col = isCallerCurrent ? "callerCandidates" : "calleeCandidates";
-                Map<String, Object> map = new HashMap<>();
-                map.put("candidate", candidate.sdp);
-                map.put("sdpMid", candidate.sdpMid);
-                map.put("sdpMLineIndex", candidate.sdpMLineIndex);
-                db.collection("calls").document("live_channel").collection(col).add(map);
+            public void onTabSelected(TabLayout.Tab tab) {
+                int pos = tab.getPosition();
+                rvChats.setVisibility(pos == 0 ? View.VISIBLE : View.GONE);
+                statusContainer.setVisibility(pos == 1 ? View.VISIBLE : View.GONE);
+                rvCalls.setVisibility(pos == 2 ? View.VISIBLE : View.GONE);
             }
+            @Override public void onTabUnselected(TabLayout.Tab tab) {}
+            @Override public void onTabReselected(TabLayout.Tab tab) {}
+        });
 
-            @Override
-            public void onRemoteStreamAdded(VideoTrack videoTrack) {
-                runOnUiThread(() -> videoTrack.addSink(remoteVideoView));
+        findViewById(R.id.btnSearch).setOnClickListener(v -> {
+            if (etSearch.getVisibility() == View.GONE) {
+                tvAppTitle.setVisibility(View.GONE);
+                etSearch.setVisibility(View.VISIBLE);
+                etSearch.requestFocus();
+            } else {
+                etSearch.setText("");
+                etSearch.setVisibility(View.GONE);
+                tvAppTitle.setVisibility(View.VISIBLE);
             }
+        });
 
-            @Override
-            public void onConnectionStateChanged(PeerConnection.PeerConnectionState state) {
-                runOnUiThread(() -> {
-                    if (state == PeerConnection.PeerConnectionState.CONNECTED) {
-                        Toast.makeText(MainActivity.this, "✅ সংযুক্ত হয়েছে", Toast.LENGTH_SHORT).show();
-                    }
-                });
+        etSearch.addTextChangedListener(new TextWatcher() {
+            @Override public void beforeTextChanged(CharSequence s, int a, int b, int c) {}
+            @Override public void onTextChanged(CharSequence s, int a, int b, int c) { filterUsers(s.toString()); }
+            @Override public void afterTextChanged(Editable s) {}
+        });
+
+        findViewById(R.id.btnProfileEdit).setOnClickListener(v -> showProfileSettingsDialog());
+        findViewById(R.id.btnMyStatus).setOnClickListener(v -> showAddStatusDialog());
+        findViewById(R.id.fabAction).setOnClickListener(v -> {
+            if (tabLayout.getSelectedTabPosition() == 1) {
+                showAddStatusDialog();
+            } else {
+                Intent i = new Intent(MainActivity.this, ChatActivity.class);
+                i.putExtra("isGlobal", true);
+                i.putExtra("peerName", "Global Community");
+                startActivity(i);
             }
         });
     }
 
-    @SuppressLint("ClickableViewAccessibility")
-    private void setupDraggableLocalView() {
-        localVideoView.setOnTouchListener(new View.OnTouchListener() {
-            float dX, dY;
-            @Override
-            public boolean onTouch(View view, MotionEvent event) {
-                switch (event.getAction()) {
-                    case MotionEvent.ACTION_DOWN:
-                        dX = view.getX() - event.getRawX();
-                        dY = view.getY() - event.getRawY();
-                        return true;
-                    case MotionEvent.ACTION_MOVE:
-                        view.setX(event.getRawX() + dX);
-                        view.setY(event.getRawY() + dY);
-                        return true;
-                }
-                return false;
-            }
-        });
-    }
+    private void initAuth() {
+        SharedPreferences prefs = getSharedPreferences("DivineWA", MODE_PRIVATE);
+        myName = prefs.getString("name", "User " + (int) (100 + Math.random() * 900));
+        myAbout = prefs.getString("about", "Hey there! I am using Divine WhatsApp.");
+        myAvatarBase64 = prefs.getString("avatar", "");
 
-    private void initUserAndAuth() {
-        SharedPreferences prefs = getSharedPreferences("DivinePrefs", MODE_PRIVATE);
-        myName = prefs.getString("user_name", "মিষ্টি ফ্রেন্ড " + (int) (100 + Math.random() * 900));
-        prefs.edit().putString("user_name", myName).apply();
-        tvHeaderName.setText(myName + " ✏️");
-
-        auth.signInAnonymously().addOnSuccessListener(authResult -> {
-            currentUser = authResult.getUser();
+        auth.signInAnonymously().addOnSuccessListener(res -> {
+            currentUser = res.getUser();
             if (currentUser != null) {
-                adapter.setCurrentUserId(currentUser.getUid());
-                listenMessages();
-                listenIncomingCalls();
+                callAdapter.setMyUid(currentUser.getUid());
+                saveProfileToPrefsAndFirestore();
+                listenUsers();
+                listenStatuses();
+                listenCallLogs();
+                listenGlobalIncomingCalls();
             }
         }).addOnFailureListener(e ->
-                Toast.makeText(this, "Auth ব্যর্থ: " + e.getMessage(), Toast.LENGTH_LONG).show()
+                Toast.makeText(this, "Auth error: " + e.getMessage(), Toast.LENGTH_LONG).show()
         );
     }
 
-    private void listenMessages() {
-        db.collection("messages")
-                .orderBy("createdAt", Query.Direction.ASCENDING)
-                .limitToLast(60)
-                .addSnapshotListener((snapshots, error) -> {
-                    if (error != null || snapshots == null) return;
-                    for (DocumentChange dc : snapshots.getDocumentChanges()) {
-                        if (dc.getType() == DocumentChange.Type.ADDED) {
-                            MessageModel m = dc.getDocument().toObject(MessageModel.class);
-                            m.setId(dc.getDocument().getId());
-                            messageList.add(m);
-                            adapter.notifyItemInserted(messageList.size() - 1);
-                            rvMessages.scrollToPosition(messageList.size() - 1);
+    private void saveProfileToPrefsAndFirestore() {
+        getSharedPreferences("DivineWA", MODE_PRIVATE).edit()
+                .putString("name", myName)
+                .putString("about", myAbout)
+                .putString("avatar", myAvatarBase64 != null ? myAvatarBase64 : "")
+                .apply();
+
+        if (currentUser == null) return;
+        Map<String, Object> map = new HashMap<>();
+        map.put("uid", currentUser.getUid());
+        map.put("name", myName);
+        map.put("about", myAbout);
+        map.put("avatarBase64", myAvatarBase64 != null ? myAvatarBase64 : "");
+        map.put("online", true);
+        map.put("lastSeen", System.currentTimeMillis());
+        db.collection("users").document(currentUser.getUid()).set(map, SetOptions.merge());
+    }
+
+    private void listenUsers() {
+        db.collection("users").addSnapshotListener((snaps, err) -> {
+            if (snaps == null || currentUser == null) return;
+            allUsers.clear();
+
+            UserModel global = new UserModel();
+            global.setUid("global_room");
+            global.setName("Global Community Chat");
+            global.setAbout("Tap to chat & call with everyone!");
+            global.setGlobalRoom(true);
+            allUsers.add(global);
+
+            for (DocumentSnapshot d : snaps.getDocuments()) {
+                UserModel u = d.toObject(UserModel.class);
+                if (u != null && !currentUser.getUid().equals(u.getUid())) {
+                    allUsers.add(u);
+                }
+            }
+            filterUsers(etSearch.getText().toString());
+        });
+    }
+
+    private void filterUsers(String q) {
+        filteredUsers.clear();
+        String query = q.toLowerCase().trim();
+        for (UserModel u : allUsers) {
+            if (query.isEmpty() || (u.getName() != null && u.getName().toLowerCase().contains(query))) {
+                filteredUsers.add(u);
+            }
+        }
+        userAdapter.notifyDataSetChanged();
+    }
+
+    private void listenStatuses() {
+        db.collection("statuses").orderBy("timestamp", Query.Direction.DESCENDING).limit(40)
+                .addSnapshotListener((snaps, err) -> {
+                    if (snaps == null) return;
+                    statusList.clear();
+                    long cutoff = System.currentTimeMillis() - (24 * 60 * 60 * 1000L);
+                    for (DocumentSnapshot d : snaps.getDocuments()) {
+                        StatusModel s = d.toObject(StatusModel.class);
+                        if (s != null && s.getTimestamp() >= cutoff) {
+                            s.setId(d.getId());
+                            statusList.add(s);
                         }
+                    }
+                    statusAdapter.notifyDataSetChanged();
+                });
+    }
+
+    private void listenCallLogs() {
+        db.collection("call_logs").orderBy("timestamp", Query.Direction.DESCENDING).limit(40)
+                .addSnapshotListener((snaps, err) -> {
+                    if (snaps == null || currentUser == null) return;
+                    callList.clear();
+                    String uid = currentUser.getUid();
+                    for (DocumentSnapshot d : snaps.getDocuments()) {
+                        CallLogModel c = d.toObject(CallLogModel.class);
+                        if (c != null && (uid.equals(c.getCallerId()) || uid.equals(c.getReceiverId()) || "global_room".equals(c.getReceiverId()))) {
+                            callList.add(c);
+                        }
+                    }
+                    callAdapter.notifyDataSetChanged();
+                });
+    }
+
+    private void listenGlobalIncomingCalls() {
+        db.collection("calls").whereEqualTo("status", "calling")
+                .addSnapshotListener((snaps, err) -> {
+                    if (snaps == null || currentUser == null || ChatActivity.isChatOpen) {
+                        incomingOverlay.setVisibility(View.GONE);
+                        return;
+                    }
+                    String uid = currentUser.getUid();
+                    DocumentSnapshot foundCall = null;
+                    for (DocumentSnapshot d : snaps.getDocuments()) {
+                        String callerId = d.getString("callerId");
+                        String receiverId = d.getString("receiverId");
+                        if (!uid.equals(callerId) && (uid.equals(receiverId) || "live_channel".equals(d.getId()))) {
+                            foundCall = d;
+                            break;
+                        }
+                    }
+                    if (foundCall != null) {
+                        DocumentSnapshot callDoc = foundCall;
+                        incomingOverlay.setVisibility(View.VISIBLE);
+                        String cname = callDoc.getString("callerName");
+                        String ctype = callDoc.getString("type");
+                        tvCallerName.setText(cname != null ? cname : "Friend");
+                        tvCallType.setText("video".equals(ctype) ? "Incoming video call..." : "Incoming voice call...");
+
+                        findViewById(R.id.btnRejectCall).setOnClickListener(v -> {
+                            incomingOverlay.setVisibility(View.GONE);
+                            callDoc.getReference().update("status", "ended");
+                        });
+                        findViewById(R.id.btnAcceptCall).setOnClickListener(v -> {
+                            incomingOverlay.setVisibility(View.GONE);
+                            Intent i = new Intent(MainActivity.this, ChatActivity.class);
+                            boolean isGlob = "live_channel".equals(callDoc.getId());
+                            i.putExtra("isGlobal", isGlob);
+                            i.putExtra("peerUid", callDoc.getString("callerId"));
+                            i.putExtra("peerName", cname);
+                            i.putExtra("autoAcceptCallId", callDoc.getId());
+                            startActivity(i);
+                        });
+                    } else {
+                        incomingOverlay.setVisibility(View.GONE);
                     }
                 });
     }
 
-    private void sendTextMessage() {
-        String text = etMessage.getText().toString().trim();
-        if (text.isEmpty() || currentUser == null) return;
-        etMessage.setText("");
-        sendMessageToFirestore(text, "text", null);
-    }
+    private void showProfileSettingsDialog() {
+        LinearLayout layout = new LinearLayout(this);
+        layout.setOrientation(LinearLayout.VERTICAL);
+        layout.setPadding(40, 24, 40, 12);
 
-    private void sendMessageToFirestore(String text, String type, String mediaUrl) {
-        Map<String, Object> msg = new HashMap<>();
-        msg.put("text", text);
-        msg.put("type", type);
-        msg.put("mediaUrl", mediaUrl);
-        msg.put("senderId", currentUser.getUid());
-        msg.put("senderName", myName);
-        msg.put("createdAt", FieldValue.serverTimestamp());
-        db.collection("messages").add(msg);
-    }
+        EditText etName = new EditText(this);
+        etName.setHint("Your Name");
+        etName.setText(myName);
 
-    private void showAttachDialog() {
-        String[] options = {"📸 ক্যামেরা", "🖼️ গ্যালারি"};
+        EditText etAbout = new EditText(this);
+        etAbout.setHint("About / Bio");
+        etAbout.setText(myAbout);
+
+        layout.addView(etName);
+        layout.addView(etAbout);
+
         new AlertDialog.Builder(this)
-                .setTitle("ছবি পাঠান")
-                .setItems(options, (dialog, which) -> {
+                .setTitle("⚙️ Profile Settings")
+                .setView(layout)
+                .setPositiveButton("Save", (d, w) -> {
+                    String n = etName.getText().toString().trim();
+                    String a = etAbout.getText().toString().trim();
+                    if (!n.isEmpty()) myName = n;
+                    if (!a.isEmpty()) myAbout = a;
+                    saveProfileToPrefsAndFirestore();
+                    Toast.makeText(this, "Profile saved!", Toast.LENGTH_SHORT).show();
+                })
+                .setNeutralButton("Change Photo 📷", (d, w) -> {
+                    isPickingAvatar = true;
+                    imagePickerLauncher.launch("image/*");
+                })
+                .setNegativeButton("Cancel", null)
+                .show();
+    }
+
+    private void showAddStatusDialog() {
+        String[] opts = {"📝 Text Status", "🖼️ Photo Status"};
+        new AlertDialog.Builder(this)
+                .setTitle("Add Status Update")
+                .setItems(opts, (d, which) -> {
                     if (which == 0) {
-                        if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
-                            permissionLauncher.launch(new String[]{Manifest.permission.CAMERA});
-                            return;
-                        }
-                        try {
-                            File file = File.createTempFile("cam_", ".jpg", getCacheDir());
-                            cameraImageUri = FileProvider.getUriForFile(this, getPackageName() + ".fileprovider", file);
-                            cameraLauncher.launch(cameraImageUri);
-                        } catch (Exception e) {
-                            Toast.makeText(this, "ক্যামেরা খোলা যায়নি", Toast.LENGTH_SHORT).show();
-                        }
+                        EditText et = new EditText(this);
+                        et.setHint("What's on your mind?");
+                        new AlertDialog.Builder(this)
+                                .setTitle("Write Status")
+                                .setView(et)
+                                .setPositiveButton("Post", (d2, w2) -> {
+                                    String txt = et.getText().toString().trim();
+                                    if (!txt.isEmpty()) postStatusToFirestore(txt, null);
+                                })
+                                .setNegativeButton("Cancel", null)
+                                .show();
                     } else {
-                        galleryLauncher.launch("image/*");
+                        isPickingAvatar = false;
+                        imagePickerLauncher.launch("image/*");
                     }
                 }).show();
     }
 
-    private void processAndSendImage(Uri uri) {
-        Toast.makeText(this, "ছবি আপলোড হচ্ছে...", Toast.LENGTH_SHORT).show();
-        new Thread(() -> {
-            try (InputStream is = getContentResolver().openInputStream(uri)) {
-                Bitmap original = BitmapFactory.decodeStream(is);
-                if (original == null) return;
-
-                int w = original.getWidth(), h = original.getHeight(), max = 500;
-                if (w > h && w > max) {
-                    h = Math.round((float) h * max / w);
-                    w = max;
-                } else if (h > max) {
-                    w = Math.round((float) w * max / h);
-                    h = max;
-                }
-                Bitmap resized = Bitmap.createScaledBitmap(original, w, h, true);
-                ByteArrayOutputStream baos = new ByteArrayOutputStream();
-                resized.compress(Bitmap.CompressFormat.JPEG, 50, baos);
-                String base64 = "data:image/jpeg;base64," + Base64.encodeToString(baos.toByteArray(), Base64.NO_WRAP);
-
-                runOnUiThread(() -> sendMessageToFirestore("", "image", base64));
-            } catch (Exception e) {
-                runOnUiThread(() -> Toast.makeText(this, "ছবি প্রসেস ব্যর্থ", Toast.LENGTH_SHORT).show());
-            }
-        }).start();
-    }
-
-    private void showEmojiDialog() {
-        GridLayout grid = new GridLayout(this);
-        grid.setColumnCount(5);
-        grid.setPadding(24, 24, 24, 24);
-        AlertDialog dialog = new AlertDialog.Builder(this).setTitle("ইমোজি বেছে নিন").setView(grid).create();
-
-        for (String em : EMOJIS) {
-            TextView tv = new TextView(this);
-            tv.setText(em);
-            tv.setTextSize(24);
-            tv.setGravity(Gravity.CENTER);
-            tv.setPadding(16, 16, 16, 16);
-            tv.setOnClickListener(v -> {
-                etMessage.append(em);
-                dialog.dismiss();
-            });
-            grid.addView(tv);
-        }
-        dialog.show();
-    }
-
-    private void showNameDialog() {
-        EditText input = new EditText(this);
-        input.setText(myName);
-        new AlertDialog.Builder(this)
-                .setTitle("🌸 আপনার মিষ্টি নাম লিখুন")
-                .setView(input)
-                .setPositiveButton("সেভ করুন ✨", (d, w) -> {
-                    String n = input.getText().toString().trim();
-                    if (!n.isEmpty()) {
-                        myName = n;
-                        getSharedPreferences("DivinePrefs", MODE_PRIVATE).edit().putString("user_name", myName).apply();
-                        tvHeaderName.setText(myName + " ✏️");
-                        Toast.makeText(this, "🌸 নাম আপডেট হয়েছে!", Toast.LENGTH_SHORT).show();
-                    }
-                })
-                .setNegativeButton("বাতিল", null)
-                .show();
-    }
-
-    private void showHelpDialog() {
-        new AlertDialog.Builder(this)
-                .setTitle("💡 ইউজার হেল্প")
-                .setMessage("• ক্যামেরা সুইচ: 🔄 বাটনে ক্লিক করে ব্যাক ক্যামেরা ব্যবহার করুন।\n• সেলফ ভিউ: আপনার ভিডিও বক্সটি ড্র্যাগ করে সরাতে পারবেন।\n• PiP মোড: 🗗 বাটনে ক্লিক করে কল মিনিমাইজ করুন।")
-                .setPositiveButton("বুঝেছি ✨", null)
-                .show();
-    }
-
-    private void checkPermissionsAndStartCall(String type) {
-        boolean hasCam = ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED;
-        boolean hasMic = ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED;
-        if (!hasCam || !hasMic) {
-            permissionLauncher.launch(new String[]{Manifest.permission.CAMERA, Manifest.permission.RECORD_AUDIO});
-            Toast.makeText(this, "অনুগ্রহ করে ক্যামেরা ও মাইক পারমিশন দিন", Toast.LENGTH_SHORT).show();
-            return;
-        }
-        startCall(type);
-    }
-
-    @SuppressWarnings("unchecked")
-    private void startCall(String type) {
+    private void postStatusToFirestore(String text, String imageBase64) {
         if (currentUser == null) return;
-        isCallerCurrent = true;
-        activeCallType = type;
-        hasRemoteSdp = false;
-
-        setupCallUI(type, "কল যাচ্ছে...");
-        clearOldCandidates(() -> {
-            webRTCManager.startLocalMedia("video".equals(type), localVideoView);
-            webRTCManager.createPeerConnection();
-
-            webRTCManager.createOffer(offer -> {
-                Map<String, Object> offerMap = new HashMap<>();
-                offerMap.put("type", offer.type.canonicalForm());
-                offerMap.put("sdp", offer.description);
-
-                Map<String, Object> callData = new HashMap<>();
-                callData.put("callerId", currentUser.getUid());
-                callData.put("callerName", myName);
-                callData.put("type", type);
-                callData.put("status", "calling");
-                callData.put("offer", offerMap);
-                callData.put("createdAt", System.currentTimeMillis());
-
-                DocumentReference callDoc = db.collection("calls").document("live_channel");
-                callDoc.set(callData);
-
-                if (callDocListener != null) callDocListener.remove();
-                callDocListener = callDoc.addSnapshotListener((snap, err) -> {
-                    if (snap == null || !snap.exists()) return;
-                    String status = snap.getString("status");
-                    if ("connected".equals(status) && !hasRemoteSdp) {
-                        Map<String, Object> ans = (Map<String, Object>) snap.get("answer");
-                        if (ans != null) {
-                            hasRemoteSdp = true;
-                            webRTCManager.setRemoteDescription((String) ans.get("type"), (String) ans.get("sdp"));
-                            startCallTimer();
-                        }
-                    } else if ("ended".equals(status)) {
-                        hangupCall(false);
-                    }
-                });
-
-                listenCandidates("calleeCandidates");
-            });
-        });
+        Map<String, Object> map = new HashMap<>();
+        map.put("uid", currentUser.getUid());
+        map.put("userName", myName);
+        map.put("text", text);
+        map.put("imageBase64", imageBase64);
+        map.put("timestamp", System.currentTimeMillis());
+        db.collection("statuses").add(map).addOnSuccessListener(r ->
+                Toast.makeText(this, "Status posted!", Toast.LENGTH_SHORT).show());
     }
 
-    private void listenIncomingCalls() {
-        db.collection("calls").document("live_channel").addSnapshotListener((snap, err) -> {
-            if (snap == null || !snap.exists() || currentUser == null) return;
-            String status = snap.getString("status");
-            String callerId = snap.getString("callerId");
+    private void viewStatusDialog(StatusModel s) {
+        LinearLayout box = new LinearLayout(this);
+        box.setOrientation(LinearLayout.VERTICAL);
+        box.setPadding(32, 32, 32, 32);
 
-            if ("calling".equals(status) && !currentUser.getUid().equals(callerId)) {
-                String callerName = snap.getString("callerName");
-                String type = snap.getString("type");
-                incomingOverlay.setVisibility(View.VISIBLE);
-                tvCallerName.setText(callerName != null ? callerName : "ফ্রেন্ড");
-                tvCallType.setText("video".equals(type) ? "ভিডিও কল করছেন..." : "অডিও কল করছেন...");
-
-                findViewById(R.id.btnAcceptCall).setOnClickListener(v -> acceptIncomingCall(snap));
-                findViewById(R.id.btnRejectCall).setOnClickListener(v -> {
-                    incomingOverlay.setVisibility(View.GONE);
-                    db.collection("calls").document("live_channel").update("status", "ended");
-                });
-            } else if ("ended".equals(status)) {
-                incomingOverlay.setVisibility(View.GONE);
-                if (callOverlay.getVisibility() == View.VISIBLE) {
-                    hangupCall(false);
-                }
-            }
-        });
-    }
-
-    @SuppressWarnings("unchecked")
-    private void acceptIncomingCall(DocumentSnapshot snap) {
-        boolean hasCam = ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED;
-        boolean hasMic = ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED;
-        if (!hasCam || !hasMic) {
-            permissionLauncher.launch(new String[]{Manifest.permission.CAMERA, Manifest.permission.RECORD_AUDIO});
-            return;
+        if (s.getImageBase64() != null) {
+            byte[] bytes = Base64.decode(s.getImageBase64().replace("data:image/jpeg;base64,", ""), Base64.DEFAULT);
+            Bitmap bmp = BitmapFactory.decodeByteArray(bytes, 0, bytes.length);
+            ImageView iv = new ImageView(this);
+            iv.setImageBitmap(bmp);
+            iv.setAdjustViewBounds(true);
+            box.addView(iv);
         }
-
-        incomingOverlay.setVisibility(View.GONE);
-        isCallerCurrent = false;
-        activeCallType = snap.getString("type");
-        if (activeCallType == null) activeCallType = "video";
-
-        setupCallUI(activeCallType, snap.getString("callerName"));
-        webRTCManager.startLocalMedia("video".equals(activeCallType), localVideoView);
-        webRTCManager.createPeerConnection();
-
-        Map<String, Object> offer = (Map<String, Object>) snap.get("offer");
-        if (offer != null) {
-            webRTCManager.setRemoteDescription((String) offer.get("type"), (String) offer.get("sdp"));
-            webRTCManager.createAnswer(answer -> {
-                Map<String, Object> ansMap = new HashMap<>();
-                ansMap.put("type", answer.type.canonicalForm());
-                ansMap.put("sdp", answer.description);
-
-                Map<String, Object> updates = new HashMap<>();
-                updates.put("answer", ansMap);
-                updates.put("status", "connected");
-                db.collection("calls").document("live_channel").update(updates);
-
-                listenCandidates("callerCandidates");
-                startCallTimer();
-            });
+        if (s.getText() != null && !s.getText().isEmpty()) {
+            TextView tv = new TextView(this);
+            tv.setText(s.getText());
+            tv.setTextSize(18);
+            tv.setPadding(0, 16, 0, 0);
+            box.addView(tv);
         }
+        new AlertDialog.Builder(this).setTitle(s.getUserName() + "'s Status").setView(box).setPositiveButton("Close", null).show();
     }
 
-    private void listenCandidates(String collectionName) {
-        if (candidatesListener != null) candidatesListener.remove();
-        candidatesListener = db.collection("calls").document("live_channel")
-                .collection(collectionName)
-                .addSnapshotListener((snapshots, err) -> {
-                    if (snapshots == null) return;
-                    for (DocumentChange dc : snapshots.getDocumentChanges()) {
-                        if (dc.getType() == DocumentChange.Type.ADDED) {
-                            String cand = dc.getDocument().getString("candidate");
-                            String sdpMid = dc.getDocument().getString("sdpMid");
-                            Object idxObj = dc.getDocument().get("sdpMLineIndex");
-                            int idx = idxObj instanceof Number ? ((Number) idxObj).intValue() : 0;
-                            if (cand != null) {
-                                webRTCManager.addIceCandidate(sdpMid, idx, cand);
-                            }
-                        }
-                    }
-                });
+    private String compressUriToBase64(Uri uri) {
+        try (InputStream is = getContentResolver().openInputStream(uri)) {
+            Bitmap orig = BitmapFactory.decodeStream(is);
+            if (orig == null) return null;
+            int w = orig.getWidth(), h = orig.getHeight(), max = 450;
+            if (w > h && w > max) { h = Math.round((float) h * max / w); w = max; }
+            else if (h > max) { w = Math.round((float) w * max / h); h = max; }
+            Bitmap res = Bitmap.createScaledBitmap(orig, w, h, true);
+            ByteArrayOutputStream baos = new ByteArrayOutputStream();
+            res.compress(Bitmap.CompressFormat.JPEG, 50, baos);
+            return Base64.encodeToString(baos.toByteArray(), Base64.NO_WRAP);
+        } catch (Exception e) { return null; }
     }
 
-    private void clearOldCandidates(Runnable onDone) {
-        DocumentReference callDoc = db.collection("calls").document("live_channel");
-        callDoc.collection("callerCandidates").get().addOnSuccessListener(s1 -> {
-            for (DocumentSnapshot d : s1.getDocuments()) d.getReference().delete();
-            callDoc.collection("calleeCandidates").get().addOnSuccessListener(s2 -> {
-                for (DocumentSnapshot d : s2.getDocuments()) d.getReference().delete();
-                onDone.run();
-            });
-        });
-    }
-
-    private void setupCallUI(String type, String targetName) {
-        audioManager.setMode(AudioManager.MODE_IN_COMMUNICATION);
-        audioManager.setSpeakerphoneOn(true);
-        isSpeakerOn = true;
-        isMuted = false;
-        isCamOff = false;
-
-        minimizeCallUI(false);
-        callOverlay.setVisibility(View.VISIBLE);
-        tvActiveTarget.setText(targetName != null ? targetName : "ফ্রেন্ড");
-        tvCallTimer.setText("সংযুক্ত হচ্ছে... 🌸");
-
-        int vis = "video".equals(type) ? View.VISIBLE : View.GONE;
-        localVideoView.setVisibility(vis);
-        remoteVideoView.setVisibility(vis);
-    }
-
-    private void minimizeCallUI(boolean minimize) {
-        FrameLayout.LayoutParams params = (FrameLayout.LayoutParams) callOverlay.getLayoutParams();
-        if (minimize) {
-            params.width = dpToPx(150);
-            params.height = dpToPx(210);
-            params.gravity = Gravity.BOTTOM | Gravity.END;
-            params.setMargins(0, 0, dpToPx(16), dpToPx(80));
-            callTopBar.setVisibility(View.GONE);
-            callBottomBar.setVisibility(View.GONE);
-            btnMaximize.setVisibility(View.VISIBLE);
-        } else {
-            params.width = ViewGroup.LayoutParams.MATCH_PARENT;
-            params.height = ViewGroup.LayoutParams.MATCH_PARENT;
-            params.gravity = Gravity.NO_GRAVITY;
-            params.setMargins(0, 0, 0, 0);
-            callTopBar.setVisibility(View.VISIBLE);
-            callBottomBar.setVisibility(View.VISIBLE);
-            btnMaximize.setVisibility(View.GONE);
-        }
-        callOverlay.setLayoutParams(params);
-    }
-
-    private int dpToPx(int dp) {
-        return Math.round(dp * getResources().getDisplayMetrics().density);
-    }
-
-    private void startCallTimer() {
-        callStartTime = System.currentTimeMillis();
-        if (timerRunnable != null) timerHandler.removeCallbacks(timerRunnable);
-        timerRunnable = new Runnable() {
-            @Override
-            public void run() {
-                long sec = (System.currentTimeMillis() - callStartTime) / 1000;
-                tvCallTimer.setText(String.format(Locale.getDefault(), "কথা চলছে: %02d:%02d", sec / 60, sec % 60));
-                timerHandler.postDelayed(this, 1000);
-            }
-        };
-        timerHandler.post(timerRunnable);
-    }
-
-    private void hangupCall(boolean notifyFirebase) {
-        if (timerRunnable != null) timerHandler.removeCallbacks(timerRunnable);
-        if (callDocListener != null) { callDocListener.remove(); callDocListener = null; }
-        if (candidatesListener != null) { candidatesListener.remove(); candidatesListener = null; }
-
-        webRTCManager.endCall();
-        localVideoView.clearImage();
-        remoteVideoView.clearImage();
-        callOverlay.setVisibility(View.GONE);
-        audioManager.setMode(AudioManager.MODE_NORMAL);
-
-        if (notifyFirebase) {
-            db.collection("calls").document("live_channel").update("status", "ended");
+    @Override
+    protected void onResume() {
+        super.onResume();
+        if (currentUser != null) {
+            db.collection("users").document(currentUser.getUid()).update("online", true, "lastSeen", System.currentTimeMillis());
         }
     }
 
     @Override
-    protected void onDestroy() {
-        super.onDestroy();
-        if (timerRunnable != null) timerHandler.removeCallbacks(timerRunnable);
-        if (webRTCManager != null) webRTCManager.destroyFactory();
-        if (localVideoView != null) localVideoView.release();
-        if (remoteVideoView != null) remoteVideoView.release();
-        if (eglBase != null) eglBase.release();
+    protected void onPause() {
+        super.onPause();
+        if (currentUser != null) {
+            db.collection("users").document(currentUser.getUid()).update("online", false, "lastSeen", System.currentTimeMillis());
+        }
     }
 }
