@@ -1,1 +1,454 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="#0B141A">
 
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:orientation="vertical">
+
+        <!-- চ্যাট হেডার -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="60dp"
+            android:background="#202C33"
+            android:gravity="center_vertical"
+            android:paddingHorizontal="8dp">
+
+            <Button
+                android:id="@+id/btnBack"
+                android:layout_width="38dp"
+                android:layout_height="38dp"
+                android:backgroundTint="#00000000"
+                android:padding="0dp"
+                android:text="←"
+                android:textColor="#E9EDEF"
+                android:textSize="20sp" />
+
+            <FrameLayout
+                android:layout_width="40dp"
+                android:layout_height="40dp">
+                <TextView
+                    android:id="@+id/tvChatAvatar"
+                    android:layout_width="match_parent"
+                    android:layout_height="match_parent"
+                    android:background="@drawable/bg_wa_circle_gray"
+                    android:gravity="center"
+                    android:text="👤"
+                    android:textColor="#FFFFFF"
+                    android:textSize="16sp" />
+                <View
+                    android:id="@+id/viewChatOnline"
+                    android:layout_width="11dp"
+                    android:layout_height="11dp"
+                    android:layout_gravity="bottom|end"
+                    android:background="@drawable/bg_wa_online_dot"
+                    android:visibility="gone" />
+            </FrameLayout>
+
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="10dp"
+                android:layout_weight="1"
+                android:orientation="vertical">
+
+                <TextView
+                    android:id="@+id/tvChatName"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:ellipsize="end"
+                    android:maxLines="1"
+                    android:text="Friend"
+                    android:textColor="#E9EDEF"
+                    android:textSize="16sp"
+                    android:textStyle="bold" />
+
+                <TextView
+                    android:id="@+id/tvChatStatus"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="online"
+                    android:textColor="#00A884"
+                    android:textSize="12sp" />
+            </LinearLayout>
+
+            <Button
+                android:id="@+id/btnVideoCall"
+                android:layout_width="40dp"
+                android:layout_height="40dp"
+                android:backgroundTint="#00000000"
+                android:padding="0dp"
+                android:text="🎥"
+                android:textSize="18sp" />
+
+            <Button
+                android:id="@+id/btnAudioCall"
+                android:layout_width="40dp"
+                android:layout_height="40dp"
+                android:backgroundTint="#00000000"
+                android:padding="0dp"
+                android:text="📞"
+                android:textSize="18sp" />
+        </LinearLayout>
+
+        <!-- মেসেজ লিস্ট -->
+        <androidx.recyclerview.widget.RecyclerView
+            android:id="@+id/rvMessages"
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1"
+            android:paddingVertical="6dp" />
+
+        <!-- Reply প্রিভিউ বার -->
+        <LinearLayout
+            android:id="@+id/replyPreviewLayout"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginHorizontal="8dp"
+            android:background="@drawable/bg_wa_reply_bar"
+            android:gravity="center_vertical"
+            android:padding="10dp"
+            android:visibility="gone">
+
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:orientation="vertical">
+                <TextView
+                    android:id="@+id/tvReplySender"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:textColor="#00A884"
+                    android:textSize="12sp"
+                    android:textStyle="bold" />
+                <TextView
+                    android:id="@+id/tvReplyText"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:ellipsize="end"
+                    android:maxLines="1"
+                    android:textColor="#B0BEC5"
+                    android:textSize="13sp" />
+            </LinearLayout>
+
+            <Button
+                android:id="@+id/btnCancelReply"
+                android:layout_width="32dp"
+                android:layout_height="32dp"
+                android:backgroundTint="#00000000"
+                android:padding="0dp"
+                android:text="✕"
+                android:textColor="#8696A0" />
+        </LinearLayout>
+
+        <!-- ভয়েস রেকর্ডিং বার -->
+        <LinearLayout
+            android:id="@+id/recordingBar"
+            android:layout_width="match_parent"
+            android:layout_height="52dp"
+            android:layout_margin="8dp"
+            android:background="@drawable/bg_wa_input"
+            android:gravity="center_vertical"
+            android:paddingHorizontal="14dp"
+            android:visibility="gone">
+
+            <TextView
+                android:id="@+id/tvRecordTime"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="🔴 Recording... 00:00"
+                android:textColor="#EF4444"
+                android:textSize="14sp"
+                android:textStyle="bold" />
+
+            <Button
+                android:id="@+id/btnCancelRecord"
+                android:layout_width="wrap_content"
+                android:layout_height="36dp"
+                android:backgroundTint="#2A3942"
+                android:text="Cancel"
+                android:textColor="#FFFFFF"
+                android:textSize="12sp" />
+
+            <Button
+                android:id="@+id/btnSendRecord"
+                android:layout_width="wrap_content"
+                android:layout_height="36dp"
+                android:layout_marginStart="8dp"
+                android:backgroundTint="#00A884"
+                android:text="Send ➤"
+                android:textColor="#FFFFFF"
+                android:textSize="12sp" />
+        </LinearLayout>
+
+        <!-- WhatsApp ইনপুট বার -->
+        <LinearLayout
+            android:id="@+id/inputRowLayout"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:gravity="bottom"
+            android:padding="6dp">
+
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:background="@drawable/bg_wa_input"
+                android:gravity="center_vertical"
+                android:paddingHorizontal="8dp"
+                android:paddingVertical="4dp">
+
+                <Button
+                    android:id="@+id/btnEmoji"
+                    android:layout_width="36dp"
+                    android:layout_height="36dp"
+                    android:backgroundTint="#00000000"
+                    android:padding="0dp"
+                    android:text="😀"
+                    android:textSize="18sp" />
+
+                <EditText
+                    android:id="@+id/etMessage"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:background="@null"
+                    android:hint="Message"
+                    android:maxLines="4"
+                    android:padding="8dp"
+                    android:textColor="#E9EDEF"
+                    android:textColorHint="#8696A0"
+                    android:textSize="15sp" />
+
+                <Button
+                    android:id="@+id/btnAttach"
+                    android:layout_width="36dp"
+                    android:layout_height="36dp"
+                    android:backgroundTint="#00000000"
+                    android:padding="0dp"
+                    android:text="📎"
+                    android:textSize="17sp" />
+
+                <Button
+                    android:id="@+id/btnCamQuick"
+                    android:layout_width="36dp"
+                    android:layout_height="36dp"
+                    android:backgroundTint="#00000000"
+                    android:padding="0dp"
+                    android:text="📷"
+                    android:textSize="17sp" />
+            </LinearLayout>
+
+            <Button
+                android:id="@+id/btnSendOrMic"
+                android:layout_width="48dp"
+                android:layout_height="48dp"
+                android:layout_marginStart="6dp"
+                android:background="@drawable/bg_wa_circle_green"
+                app:backgroundTint="@null"
+                android:padding="0dp"
+                android:text="🎤"
+                android:textColor="#FFFFFF"
+                android:textSize="19sp" />
+        </LinearLayout>
+    </LinearLayout>
+
+    <!-- ইনকামিং কল স্ক্রিন -->
+    <FrameLayout
+        android:id="@+id/incomingOverlay"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="#E60B141A"
+        android:visibility="gone">
+        <LinearLayout
+            android:layout_width="290dp"
+            android:layout_height="wrap_content"
+            android:layout_gravity="center"
+            android:background="#202C33"
+            android:gravity="center"
+            android:orientation="vertical"
+            android:padding="24dp">
+            <TextView
+                android:layout_width="68dp"
+                android:layout_height="68dp"
+                android:background="@drawable/bg_wa_circle_green"
+                android:gravity="center"
+                android:text="📞"
+                android:textSize="28sp" />
+            <TextView
+                android:id="@+id/tvCallerName"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="14dp"
+                android:textColor="#FFFFFF"
+                android:textSize="18sp"
+                android:textStyle="bold" />
+            <TextView
+                android:id="@+id/tvCallType"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="4dp"
+                android:textColor="#8696A0"
+                android:textSize="13sp" />
+            <LinearLayout
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="24dp"
+                android:orientation="horizontal">
+                <Button
+                    android:id="@+id/btnRejectCall"
+                    android:layout_width="60dp"
+                    android:layout_height="60dp"
+                    android:backgroundTint="#EF4444"
+                    android:text="✕"
+                    android:textColor="#FFFFFF"
+                    android:textSize="20sp" />
+                <Button
+                    android:id="@+id/btnAcceptCall"
+                    android:layout_width="60dp"
+                    android:layout_height="60dp"
+                    android:layout_marginStart="32dp"
+                    android:backgroundTint="#00A884"
+                    android:text="📞"
+                    android:textColor="#FFFFFF"
+                    android:textSize="20sp" />
+            </LinearLayout>
+        </LinearLayout>
+    </FrameLayout>
+
+    <!-- অ্যাক্টিভ ভিডিও/অডিও কল স্ক্রিন -->
+    <FrameLayout
+        android:id="@+id/callOverlay"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="#0B141A"
+        android:visibility="gone">
+
+        <org.webrtc.SurfaceViewRenderer
+            android:id="@+id/remoteVideoView"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent" />
+
+        <org.webrtc.SurfaceViewRenderer
+            android:id="@+id/localVideoView"
+            android:layout_width="115dp"
+            android:layout_height="165dp"
+            android:layout_gravity="top|end"
+            android:layout_marginTop="68dp"
+            android:layout_marginEnd="16dp" />
+
+        <LinearLayout
+            android:id="@+id/callTopBar"
+            android:layout_width="match_parent"
+            android:layout_height="64dp"
+            android:background="#66000000"
+            android:gravity="center_vertical"
+            android:paddingHorizontal="16dp">
+
+            <Button
+                android:id="@+id/btnSpeaker"
+                android:layout_width="40dp"
+                android:layout_height="40dp"
+                android:backgroundTint="#33FFFFFF"
+                android:padding="0dp"
+                android:text="🔊" />
+
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:gravity="center"
+                android:orientation="vertical">
+                <TextView
+                    android:id="@+id/tvActiveTarget"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:textColor="#FFFFFF"
+                    android:textSize="16sp"
+                    android:textStyle="bold" />
+                <TextView
+                    android:id="@+id/tvCallTimer"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="00:00"
+                    android:textColor="#CCCCCC"
+                    android:textSize="13sp" />
+            </LinearLayout>
+
+            <Button
+                android:id="@+id/btnMinimize"
+                android:layout_width="40dp"
+                android:layout_height="40dp"
+                android:backgroundTint="#33FFFFFF"
+                android:padding="0dp"
+                android:text="🗗" />
+        </LinearLayout>
+
+        <Button
+            android:id="@+id/btnMaximize"
+            android:layout_width="36dp"
+            android:layout_height="36dp"
+            android:layout_gravity="top|end"
+            android:layout_margin="8dp"
+            android:backgroundTint="#80000000"
+            android:padding="0dp"
+            android:text="⛶"
+            android:textColor="#FFFFFF"
+            android:visibility="gone" />
+
+        <LinearLayout
+            android:id="@+id/callBottomBar"
+            android:layout_width="wrap_content"
+            android:layout_height="76dp"
+            android:layout_gravity="bottom|center_horizontal"
+            android:layout_marginBottom="28dp"
+            android:background="#CC202C33"
+            android:gravity="center"
+            android:paddingHorizontal="16dp">
+
+            <Button
+                android:id="@+id/btnMic"
+                android:layout_width="48dp"
+                android:layout_height="48dp"
+                android:backgroundTint="#33FFFFFF"
+                android:padding="0dp"
+                android:text="🎤" />
+
+            <Button
+                android:id="@+id/btnCam"
+                android:layout_width="48dp"
+                android:layout_height="48dp"
+                android:layout_marginStart="10dp"
+                android:backgroundTint="#33FFFFFF"
+                android:padding="0dp"
+                android:text="📷" />
+
+            <Button
+                android:id="@+id/btnSwitchCam"
+                android:layout_width="48dp"
+                android:layout_height="48dp"
+                android:layout_marginStart="10dp"
+                android:backgroundTint="#33FFFFFF"
+                android:padding="0dp"
+                android:text="🔄" />
+
+            <Button
+                android:id="@+id/btnHangup"
+                android:layout_width="56dp"
+                android:layout_height="56dp"
+                android:layout_marginStart="12dp"
+                android:backgroundTint="#EF4444"
+                android:padding="0dp"
+                android:text="✕"
+                android:textColor="#FFFFFF"
+                android:textSize="20sp" />
+        </LinearLayout>
+    </FrameLayout>
+
+</FrameLayout>
