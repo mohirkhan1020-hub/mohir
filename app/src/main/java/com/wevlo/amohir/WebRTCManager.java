@@ -4,7 +4,9 @@ import android.content.Context;
 
 import org.webrtc.AudioSource;
 import org.webrtc.AudioTrack;
+import org.webrtc.Camera1Enumerator;
 import org.webrtc.Camera2Enumerator;
+import org.webrtc.CameraEnumerator;
 import org.webrtc.CameraVideoCapturer;
 import org.webrtc.DataChannel;
 import org.webrtc.DefaultVideoDecoderFactory;
@@ -24,6 +26,8 @@ import org.webrtc.SurfaceTextureHelper;
 import org.webrtc.SurfaceViewRenderer;
 import org.webrtc.VideoSource;
 import org.webrtc.VideoTrack;
+import org.webrtc.audio.AudioDeviceModule;
+import org.webrtc.audio.JavaAudioDeviceModule;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -35,12 +39,18 @@ public class WebRTCManager {
         void onIceCandidateGenerated(IceCandidate candidate);
         void onRemoteStreamAdded(VideoTrack videoTrack);
         void onConnectionStateChanged(PeerConnection.PeerConnectionState state);
+        void onError(String message);
+    }
+
+    public interface SdpResultListener {
+        void onSuccess(SessionDescription sdp);
     }
 
     private final Context context;
     private final EglBase eglBase;
-    private final PeerConnectionFactory factory;
     private final Callback callback;
+    private final AudioDeviceModule audioDeviceModule;
+    private final PeerConnectionFactory factory;
 
     private PeerConnection peerConnection;
     private AudioSource audioSource;
@@ -49,6 +59,11 @@ public class WebRTCManager {
     private VideoTrack localVideoTrack;
     private CameraVideoCapturer videoCapturer;
     private SurfaceTextureHelper surfaceTextureHelper;
+
+    private boolean isVideoCall = true;
+    private boolean isRemoteSdpSet = false;
+    private final List<IceCandidate> pendingIceCandidates = new ArrayList<>();
+    private final Object iceLock = new Object();
 
     public WebRTCManager(Context context, EglBase eglBase, Callback callback) {
         this.context = context.getApplicationContext();
@@ -60,13 +75,21 @@ public class WebRTCManager {
                         .createInitializationOptions()
         );
 
+        audioDeviceModule = JavaAudioDeviceModule.builder(this.context)
+                .setUseHardwareAcousticEchoCanceler(true)
+                .setUseHardwareNoiseSuppressor(true)
+                .createAudioDeviceModule();
+
         factory = PeerConnectionFactory.builder()
+                .setAudioDeviceModule(audioDeviceModule)
                 .setVideoEncoderFactory(new DefaultVideoEncoderFactory(eglBase.getEglBaseContext(), true, true))
                 .setVideoDecoderFactory(new DefaultVideoDecoderFactory(eglBase.getEglBaseContext()))
                 .createPeerConnectionFactory();
     }
 
     public void startLocalMedia(boolean isVideo, SurfaceViewRenderer localView) {
+        this.isVideoCall = isVideo;
+
         MediaConstraints audioConstraints = new MediaConstraints();
         audioConstraints.mandatory.add(new MediaConstraints.KeyValuePair("googEchoCancellation", "true"));
         audioConstraints.mandatory.add(new MediaConstraints.KeyValuePair("googNoiseSuppression", "true"));
@@ -82,17 +105,26 @@ public class WebRTCManager {
                 surfaceTextureHelper = SurfaceTextureHelper.create("CaptureThread", eglBase.getEglBaseContext());
                 videoSource = factory.createVideoSource(videoCapturer.isScreencast());
                 videoCapturer.initialize(surfaceTextureHelper, context, videoSource.getCapturerObserver());
-                videoCapturer.startCapture(1280, 720, 30);
+                try {
+                    videoCapturer.startCapture(640, 480, 30);
+                } catch (Exception e) {
+                    callback.onError("Camera error: " + e.getMessage());
+                }
 
                 localVideoTrack = factory.createVideoTrack("ARDAMSv0", videoSource);
                 localVideoTrack.setEnabled(true);
                 localVideoTrack.addSink(localView);
+            } else {
+                callback.onError("No camera found");
             }
         }
     }
 
     private CameraVideoCapturer createCameraCapturer() {
-        Camera2Enumerator enumerator = new Camera2Enumerator(context);
+        CameraEnumerator enumerator = Camera2Enumerator.isSupported(context)
+                ? new Camera2Enumerator(context)
+                : new Camera1Enumerator(true);
+
         for (String name : enumerator.getDeviceNames()) {
             if (enumerator.isFrontFacing(name)) {
                 CameraVideoCapturer capturer = enumerator.createCapturer(name, null);
@@ -109,12 +141,20 @@ public class WebRTCManager {
     }
 
     public void createPeerConnection() {
+        synchronized (iceLock) {
+            isRemoteSdpSet = false;
+            pendingIceCandidates.clear();
+        }
+
         List<PeerConnection.IceServer> iceServers = new ArrayList<>();
+        iceServers.add(PeerConnection.IceServer.builder("stun:stun.l.google.com:19302").createIceServer());
         iceServers.add(PeerConnection.IceServer.builder("stun:stun1.l.google.com:19302").createIceServer());
         iceServers.add(PeerConnection.IceServer.builder("stun:stun2.l.google.com:19302").createIceServer());
+        iceServers.add(PeerConnection.IceServer.builder("stun:stun3.l.google.com:19302").createIceServer());
 
         PeerConnection.RTCConfiguration rtcConfig = new PeerConnection.RTCConfiguration(iceServers);
         rtcConfig.sdpSemantics = PeerConnection.SdpSemantics.UNIFIED_PLAN;
+        rtcConfig.continualGatheringPolicy = PeerConnection.ContinualGatheringPolicy.GATHER_CONTINUALLY;
 
         peerConnection = factory.createPeerConnection(rtcConfig, new PeerConnection.Observer() {
             @Override
@@ -157,36 +197,73 @@ public class WebRTCManager {
     public void createOffer(SdpResultListener listener) {
         if (peerConnection == null) return;
         MediaConstraints constraints = new MediaConstraints();
+        constraints.mandatory.add(new MediaConstraints.KeyValuePair("OfferToReceiveAudio", "true"));
+        constraints.mandatory.add(new MediaConstraints.KeyValuePair("OfferToReceiveVideo", String.valueOf(isVideoCall)));
+
         peerConnection.createOffer(new SimpleSdpObserver() {
             @Override
             public void onCreateSuccess(SessionDescription sdp) {
-                peerConnection.setLocalDescription(new SimpleSdpObserver(), sdp);
-                listener.onSuccess(sdp);
+                peerConnection.setLocalDescription(new SimpleSdpObserver() {
+                    @Override public void onSetSuccess() { listener.onSuccess(sdp); }
+                    @Override public void onSetFailure(String err) { callback.onError("Local SDP error: " + err); }
+                }, sdp);
             }
+            @Override
+            public void onCreateFailure(String err) { callback.onError("Offer error: " + err); }
         }, constraints);
     }
 
     public void createAnswer(SdpResultListener listener) {
         if (peerConnection == null) return;
         MediaConstraints constraints = new MediaConstraints();
+        constraints.mandatory.add(new MediaConstraints.KeyValuePair("OfferToReceiveAudio", "true"));
+        constraints.mandatory.add(new MediaConstraints.KeyValuePair("OfferToReceiveVideo", String.valueOf(isVideoCall)));
+
         peerConnection.createAnswer(new SimpleSdpObserver() {
             @Override
             public void onCreateSuccess(SessionDescription sdp) {
-                peerConnection.setLocalDescription(new SimpleSdpObserver(), sdp);
-                listener.onSuccess(sdp);
+                peerConnection.setLocalDescription(new SimpleSdpObserver() {
+                    @Override public void onSetSuccess() { listener.onSuccess(sdp); }
+                    @Override public void onSetFailure(String err) { callback.onError("Local SDP error: " + err); }
+                }, sdp);
             }
+            @Override
+            public void onCreateFailure(String err) { callback.onError("Answer error: " + err); }
         }, constraints);
     }
 
-    public void setRemoteDescription(String type, String sdp) {
-        if (peerConnection == null) return;
+    public void setRemoteDescription(String type, String sdp, Runnable onSuccess) {
+        if (peerConnection == null || type == null || sdp == null) return;
         SessionDescription.Type sdpType = SessionDescription.Type.fromCanonicalForm(type.toLowerCase());
-        peerConnection.setRemoteDescription(new SimpleSdpObserver(), new SessionDescription(sdpType, sdp));
+        peerConnection.setRemoteDescription(new SimpleSdpObserver() {
+            @Override
+            public void onSetSuccess() {
+                synchronized (iceLock) {
+                    isRemoteSdpSet = true;
+                    for (IceCandidate c : pendingIceCandidates) {
+                        peerConnection.addIceCandidate(c);
+                    }
+                    pendingIceCandidates.clear();
+                }
+                if (onSuccess != null) onSuccess.run();
+            }
+
+            @Override
+            public void onSetFailure(String err) {
+                callback.onError("Remote SDP error: " + err);
+            }
+        }, new SessionDescription(sdpType, sdp));
     }
 
     public void addIceCandidate(String sdpMid, int sdpMLineIndex, String candidate) {
-        if (peerConnection != null) {
-            peerConnection.addIceCandidate(new IceCandidate(sdpMid, sdpMLineIndex, candidate));
+        if (peerConnection == null || candidate == null) return;
+        IceCandidate ice = new IceCandidate(sdpMid, sdpMLineIndex, candidate);
+        synchronized (iceLock) {
+            if (isRemoteSdpSet) {
+                peerConnection.addIceCandidate(ice);
+            } else {
+                pendingIceCandidates.add(ice);
+            }
         }
     }
 
@@ -199,12 +276,14 @@ public class WebRTCManager {
     }
 
     public void switchCamera() {
-        if (videoCapturer != null) {
-            videoCapturer.switchCamera(null);
-        }
+        if (videoCapturer != null) videoCapturer.switchCamera(null);
     }
 
     public void endCall() {
+        synchronized (iceLock) {
+            isRemoteSdpSet = false;
+            pendingIceCandidates.clear();
+        }
         if (videoCapturer != null) {
             try { videoCapturer.stopCapture(); } catch (InterruptedException ignored) {}
             videoCapturer.dispose();
@@ -233,10 +312,9 @@ public class WebRTCManager {
     public void destroyFactory() {
         endCall();
         factory.dispose();
-    }
-
-    public interface SdpResultListener {
-        void onSuccess(SessionDescription sdp);
+        if (audioDeviceModule != null) {
+            audioDeviceModule.release();
+        }
     }
 
     private static class SimpleSdpObserver implements SdpObserver {
