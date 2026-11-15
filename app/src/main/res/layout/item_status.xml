@@ -1,1 +1,49 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="70dp"
+    android:gravity="center_vertical"
+    android:orientation="horizontal"
+    android:paddingHorizontal="16dp">
 
+    <TextView
+        android:id="@+id/tvStatusIcon"
+        android:layout_width="48dp"
+        android:layout_height="48dp"
+        android:background="@drawable/bg_wa_circle_green"
+        android:gravity="center"
+        android:text="✨"
+        android:textSize="20sp" />
+
+    <LinearLayout
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="14dp"
+        android:layout_weight="1"
+        android:orientation="vertical">
+
+        <TextView
+            android:id="@+id/tvStatusUser"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:textColor="#E9EDEF"
+            android:textSize="16sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/tvStatusPreview"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:ellipsize="end"
+            android:maxLines="1"
+            android:textColor="#8696A0"
+            android:textSize="13sp" />
+    </LinearLayout>
+
+    <TextView
+        android:id="@+id/tvStatusTime"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:textColor="#8696A0"
+        android:textSize="11sp" />
+</LinearLayout>
