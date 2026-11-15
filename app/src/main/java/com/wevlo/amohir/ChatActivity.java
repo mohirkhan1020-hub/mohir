@@ -112,16 +112,30 @@ public class ChatActivity extends AppCompatActivity {
     private Ringtone ringtone;
 
     private String activeCallType = "video";
-    private boolean isMuted = false, isCamOff = false, isSpeakerOn = true, hasRemoteSdp = false, isCallerCurrent = false;
+    private boolean isMuted = false, isCamOff = false, isSpeakerOn = true;
+    private boolean hasRemoteSdp = false, isCallerCurrent = false, isAutoAccepting = false;
     private long callStartTime = 0;
     private final Handler timerHandler = new Handler(Looper.getMainLooper());
     private Runnable timerRunnable;
 
-    private ListenerRegistration msgListener, peerListener, callListener, candListener;
+    private ListenerRegistration msgListener, peerListener, callListener, incomingListener, candListener;
     private Uri cameraImageUri;
+    private Runnable pendingPermissionAction = null;
 
     private final ActivityResultLauncher<String[]> permissionLauncher =
-            registerForActivityResult(new ActivityResultContracts.RequestMultiplePermissions(), r -> {});
+            registerForActivityResult(new ActivityResultContracts.RequestMultiplePermissions(), result -> {
+                boolean hasCam = ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED;
+                boolean hasMic = ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED;
+                if (hasCam && hasMic && pendingPermissionAction != null) {
+                    Runnable action = pendingPermissionAction;
+                    pendingPermissionAction = null;
+                    action.run();
+                } else if (pendingPermissionAction != null) {
+                    pendingPermissionAction = null;
+                    Toast.makeText(this, "কলের জন্য ক্যামেরা ও মাইক পারমিশন আবশ্যক", Toast.LENGTH_SHORT).show();
+                }
+            });
+
     private final ActivityResultLauncher<String> galleryLauncher =
             registerForActivityResult(new ActivityResultContracts.GetContent(), uri -> { if (uri != null) processAndSendImage(uri); });
     private final ActivityResultLauncher<Uri> cameraLauncher =
@@ -160,14 +174,19 @@ public class ChatActivity extends AppCompatActivity {
         setupDraggableLocalView();
         listenMessages();
         listenPeerStatus();
-        listenIncomingCalls();
 
         String autoAcceptId = getIntent().getStringExtra("autoAcceptCallId");
         if (autoAcceptId != null) {
+            isAutoAccepting = true;
             db.collection("calls").document(autoAcceptId).get().addOnSuccessListener(snap -> {
-                if (snap.exists() && "calling".equals(snap.getString("status"))) acceptIncomingCall(snap);
+                if (snap.exists() && "calling".equals(snap.getString("status"))) {
+                    acceptIncomingCallWithPermission(snap);
+                } else {
+                    isAutoAccepting = false;
+                }
             });
         }
+        listenIncomingCalls();
     }
 
     private void initViews() {
@@ -224,7 +243,6 @@ public class ChatActivity extends AppCompatActivity {
         rvMessages.setLayoutManager(new LinearLayoutManager(this));
         rvMessages.setAdapter(adapter);
 
-        // WhatsApp Swipe-to-Reply
         new ItemTouchHelper(new ItemTouchHelper.SimpleCallback(0, ItemTouchHelper.RIGHT) {
             @Override public boolean onMove(@NonNull RecyclerView rv, @NonNull RecyclerView.ViewHolder vh, @NonNull RecyclerView.ViewHolder t) { return false; }
             @Override public void onSwiped(@NonNull RecyclerView.ViewHolder vh, int dir) {
@@ -353,15 +371,9 @@ public class ChatActivity extends AppCompatActivity {
     private void sendMessage(String text, String type, String mediaUrl, String voiceDuration) {
         long now = System.currentTimeMillis();
         Map<String, Object> msg = new HashMap<>();
-        msg.put("text", text);
-        msg.put("type", type);
-        msg.put("mediaUrl", mediaUrl);
-        msg.put("voiceDuration", voiceDuration);
-        msg.put("senderId", myUid);
-        msg.put("senderName", myName);
-        msg.put("timestamp", now);
-        msg.put("seen", false);
-        msg.put("reaction", "");
+        msg.put("text", text); msg.put("type", type); msg.put("mediaUrl", mediaUrl);
+        msg.put("voiceDuration", voiceDuration); msg.put("senderId", myUid); msg.put("senderName", myName);
+        msg.put("timestamp", now); msg.put("seen", false); msg.put("reaction", "");
 
         if (replyingToMsg != null) {
             msg.put("replyToSender", replyingToMsg.getSenderName() != null ? replyingToMsg.getSenderName() : "Message");
@@ -383,8 +395,7 @@ public class ChatActivity extends AppCompatActivity {
 
     private void showMessageOptionsDialog(MessageModel m) {
         List<String> opts = new ArrayList<>();
-        opts.add("↩️ Reply");
-        opts.add("😊 React");
+        opts.add("↩️ Reply"); opts.add("😊 React");
         if ("text".equals(m.getType()) && m.getText() != null) opts.add("📋 Copy");
         if (myUid.equals(m.getSenderId())) opts.add("🗑️ Delete");
 
@@ -403,8 +414,7 @@ public class ChatActivity extends AppCompatActivity {
 
     private void showReactionPicker(MessageModel m) {
         LinearLayout row = new LinearLayout(this);
-        row.setPadding(24, 24, 24, 24);
-        row.setGravity(Gravity.CENTER);
+        row.setPadding(24, 24, 24, 24); row.setGravity(Gravity.CENTER);
         AlertDialog dialog = new AlertDialog.Builder(this).setTitle("React").setView(row).create();
         for (String r : REACTIONS) {
             TextView tv = new TextView(this);
@@ -422,7 +432,6 @@ public class ChatActivity extends AppCompatActivity {
     private void startVoiceRecording() {
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
             permissionLauncher.launch(new String[]{Manifest.permission.RECORD_AUDIO});
-            Toast.makeText(this, "মাইক্রোফোন পারমিশন দিন", Toast.LENGTH_SHORT).show();
             return;
         }
         try {
@@ -441,8 +450,7 @@ public class ChatActivity extends AppCompatActivity {
             recordingBar.setVisibility(View.VISIBLE);
             recordStartTime = System.currentTimeMillis();
             recordRunnable = new Runnable() {
-                @Override
-                public void run() {
+                @Override public void run() {
                     long sec = (System.currentTimeMillis() - recordStartTime) / 1000;
                     tvRecordTime.setText(String.format(Locale.getDefault(), "🔴 Recording %02d:%02d", sec / 60, sec % 60));
                     recordHandler.postDelayed(this, 500);
@@ -518,6 +526,7 @@ public class ChatActivity extends AppCompatActivity {
         dialog.show();
     }
 
+    /* 🎥 WebRTC কল সিস্টেম (সম্পূর্ণ ফিক্সড) */
     private void initWebRTCViews() {
         audioManager = (AudioManager) getSystemService(Context.AUDIO_SERVICE);
         eglBase = EglBase.create();
@@ -531,7 +540,8 @@ public class ChatActivity extends AppCompatActivity {
         localVideoView.setZOrderMediaOverlay(true);
 
         webRTCManager = new WebRTCManager(this, eglBase, new WebRTCManager.Callback() {
-            @Override public void onIceCandidateGenerated(IceCandidate candidate) {
+            @Override
+            public void onIceCandidateGenerated(IceCandidate candidate) {
                 String col = isCallerCurrent ? "callerCandidates" : "calleeCandidates";
                 Map<String, Object> map = new HashMap<>();
                 map.put("candidate", candidate.sdp);
@@ -539,13 +549,31 @@ public class ChatActivity extends AppCompatActivity {
                 map.put("sdpMLineIndex", candidate.sdpMLineIndex);
                 db.collection("calls").document(callDocId).collection(col).add(map);
             }
-            @Override public void onRemoteStreamAdded(VideoTrack videoTrack) {
+
+            @Override
+            public void onRemoteStreamAdded(VideoTrack videoTrack) {
                 runOnUiThread(() -> videoTrack.addSink(remoteVideoView));
             }
-            @Override public void onConnectionStateChanged(PeerConnection.PeerConnectionState state) {
+
+            @Override
+            public void onConnectionStateChanged(PeerConnection.PeerConnectionState state) {
                 runOnUiThread(() -> {
-                    if (state == PeerConnection.PeerConnectionState.CONNECTED) Toast.makeText(ChatActivity.this, "Connected", Toast.LENGTH_SHORT).show();
+                    if (state == PeerConnection.PeerConnectionState.CONNECTING) {
+                        tvCallTimer.setText("Connecting...");
+                    } else if (state == PeerConnection.PeerConnectionState.CONNECTED) {
+                        startCallTimer();
+                    } else if (state == PeerConnection.PeerConnectionState.FAILED) {
+                        tvCallTimer.setText("Connection Failed (Network/NAT)");
+                        Toast.makeText(ChatActivity.this, "নেটওয়ার্কের কারণে কল কানেক্ট হয়নি", Toast.LENGTH_LONG).show();
+                    } else if (state == PeerConnection.PeerConnectionState.DISCONNECTED) {
+                        tvCallTimer.setText("Reconnecting...");
+                    }
                 });
+            }
+
+            @Override
+            public void onError(String message) {
+                runOnUiThread(() -> Toast.makeText(ChatActivity.this, message, Toast.LENGTH_SHORT).show());
             }
         });
     }
@@ -566,8 +594,8 @@ public class ChatActivity extends AppCompatActivity {
         boolean hasCam = ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED;
         boolean hasMic = ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED;
         if (!hasCam || !hasMic) {
+            pendingPermissionAction = () -> startCall(type);
             permissionLauncher.launch(new String[]{Manifest.permission.CAMERA, Manifest.permission.RECORD_AUDIO});
-            Toast.makeText(this, "ক্যামেরা ও মাইক পারমিশন দিন", Toast.LENGTH_SHORT).show();
             return;
         }
         startCall(type);
@@ -575,7 +603,9 @@ public class ChatActivity extends AppCompatActivity {
 
     @SuppressWarnings("unchecked")
     private void startCall(String type) {
-        isCallerCurrent = true; activeCallType = type; hasRemoteSdp = false;
+        isCallerCurrent = true;
+        activeCallType = type;
+        hasRemoteSdp = false;
         logCallHistory(type);
         setupCallUI(type, peerName);
 
@@ -588,63 +618,83 @@ public class ChatActivity extends AppCompatActivity {
                 offerMap.put("sdp", offer.description);
 
                 Map<String, Object> callData = new HashMap<>();
-                callData.put("callerId", myUid); callData.put("callerName", myName);
-                callData.put("receiverId", peerUid); callData.put("receiverName", peerName);
-                callData.put("type", type); callData.put("status", "calling");
-                callData.put("offer", offerMap); callData.put("createdAt", System.currentTimeMillis());
+                callData.put("callerId", myUid);
+                callData.put("callerName", myName);
+                callData.put("receiverId", peerUid);
+                callData.put("receiverName", peerName);
+                callData.put("type", type);
+                callData.put("status", "calling");
+                callData.put("offer", offerMap);
+                callData.put("createdAt", System.currentTimeMillis());
 
                 DocumentReference callDoc = db.collection("calls").document(callDocId);
-                callDoc.set(callData);
-
-                if (callListener != null) callListener.remove();
-                callListener = callDoc.addSnapshotListener((snap, err) -> {
-                    if (snap == null || !snap.exists()) return;
-                    String status = snap.getString("status");
-                    if ("connected".equals(status) && !hasRemoteSdp) {
-                        Map<String, Object> ans = (Map<String, Object>) snap.get("answer");
-                        if (ans != null) {
-                            hasRemoteSdp = true;
-                            webRTCManager.setRemoteDescription((String) ans.get("type"), (String) ans.get("sdp"));
-                            startCallTimer();
+                callDoc.set(callData).addOnSuccessListener(unused -> runOnUiThread(() -> {
+                    if (callListener != null) callListener.remove();
+                    callListener = callDoc.addSnapshotListener((snap, err) -> {
+                        if (snap == null || !snap.exists()) return;
+                        String status = snap.getString("status");
+                        if ("connected".equals(status) && !hasRemoteSdp) {
+                            Map<String, Object> ans = (Map<String, Object>) snap.get("answer");
+                            if (ans != null) {
+                                hasRemoteSdp = true;
+                                webRTCManager.setRemoteDescription((String) ans.get("type"), (String) ans.get("sdp"), () ->
+                                        runOnUiThread(() -> tvCallTimer.setText("Connecting..."))
+                                );
+                            }
+                        } else if ("ended".equals(status)) {
+                            hangupCall(false);
                         }
-                    } else if ("ended".equals(status)) hangupCall(false);
-                });
-                listenCandidates("calleeCandidates");
+                    });
+                    listenCandidates("calleeCandidates");
+                }));
             });
         });
     }
 
     private void listenIncomingCalls() {
-        db.collection("calls").document(callDocId).addSnapshotListener((snap, err) -> {
+        incomingListener = db.collection("calls").document(callDocId).addSnapshotListener((snap, err) -> {
             if (snap == null || !snap.exists()) return;
             String status = snap.getString("status");
             String callerId = snap.getString("callerId");
-            if ("calling".equals(status) && !myUid.equals(callerId) && callOverlay.getVisibility() != View.VISIBLE) {
+            Long createdAt = snap.getLong("createdAt");
+            boolean isFresh = createdAt == null || (System.currentTimeMillis() - createdAt) < 60000;
+
+            if ("calling".equals(status) && isFresh && !myUid.equals(callerId)
+                    && callOverlay.getVisibility() != View.VISIBLE && !isAutoAccepting) {
                 incomingOverlay.setVisibility(View.VISIBLE);
                 tvCallerName.setText(snap.getString("callerName"));
                 tvCallType.setText("video".equals(snap.getString("type")) ? "WhatsApp video call" : "WhatsApp voice call");
                 playRingtone();
-                findViewById(R.id.btnAcceptCall).setOnClickListener(v -> acceptIncomingCall(snap));
+                findViewById(R.id.btnAcceptCall).setOnClickListener(v -> acceptIncomingCallWithPermission(snap));
                 findViewById(R.id.btnRejectCall).setOnClickListener(v -> {
-                    stopRingtone(); incomingOverlay.setVisibility(View.GONE);
+                    stopRingtone();
+                    incomingOverlay.setVisibility(View.GONE);
                     snap.getReference().update("status", "ended");
                 });
             } else if ("ended".equals(status)) {
-                stopRingtone(); incomingOverlay.setVisibility(View.GONE);
+                stopRingtone();
+                isAutoAccepting = false;
+                incomingOverlay.setVisibility(View.GONE);
                 if (callOverlay.getVisibility() == View.VISIBLE) hangupCall(false);
             }
         });
     }
 
-    @SuppressWarnings("unchecked")
-    private void acceptIncomingCall(DocumentSnapshot snap) {
-        stopRingtone();
+    private void acceptIncomingCallWithPermission(DocumentSnapshot snap) {
         boolean hasCam = ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED;
         boolean hasMic = ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED;
         if (!hasCam || !hasMic) {
+            pendingPermissionAction = () -> acceptIncomingCall(snap);
             permissionLauncher.launch(new String[]{Manifest.permission.CAMERA, Manifest.permission.RECORD_AUDIO});
             return;
         }
+        acceptIncomingCall(snap);
+    }
+
+    @SuppressWarnings("unchecked")
+    private void acceptIncomingCall(DocumentSnapshot snap) {
+        stopRingtone();
+        isAutoAccepting = false;
         incomingOverlay.setVisibility(View.GONE);
         isCallerCurrent = false;
         activeCallType = snap.getString("type");
@@ -656,16 +706,21 @@ public class ChatActivity extends AppCompatActivity {
 
         Map<String, Object> offer = (Map<String, Object>) snap.get("offer");
         if (offer != null) {
-            webRTCManager.setRemoteDescription((String) offer.get("type"), (String) offer.get("sdp"));
-            webRTCManager.createAnswer(answer -> {
-                Map<String, Object> ansMap = new HashMap<>();
-                ansMap.put("type", answer.type.canonicalForm());
-                ansMap.put("sdp", answer.description);
-                Map<String, Object> updates = new HashMap<>();
-                updates.put("answer", ansMap); updates.put("status", "connected");
-                db.collection("calls").document(callDocId).update(updates);
-                listenCandidates("callerCandidates");
-                startCallTimer();
+            webRTCManager.setRemoteDescription((String) offer.get("type"), (String) offer.get("sdp"), () -> {
+                webRTCManager.createAnswer(answer -> {
+                    Map<String, Object> ansMap = new HashMap<>();
+                    ansMap.put("type", answer.type.canonicalForm());
+                    ansMap.put("sdp", answer.description);
+                    Map<String, Object> updates = new HashMap<>();
+                    updates.put("answer", ansMap);
+                    updates.put("status", "connected");
+                    db.collection("calls").document(callDocId).update(updates).addOnSuccessListener(u ->
+                            runOnUiThread(() -> {
+                                listenCandidates("callerCandidates");
+                                tvCallTimer.setText("Connecting...");
+                            })
+                    );
+                });
             });
         }
     }
@@ -693,8 +748,8 @@ public class ChatActivity extends AppCompatActivity {
             docRef.collection("calleeCandidates").get().addOnSuccessListener(s2 -> {
                 for (DocumentSnapshot d : s2.getDocuments()) d.getReference().delete();
                 onDone.run();
-            });
-        });
+            }).addOnFailureListener(e -> onDone.run());
+        }).addOnFailureListener(e -> onDone.run());
     }
 
     private void logCallHistory(String type) {
@@ -718,10 +773,13 @@ public class ChatActivity extends AppCompatActivity {
 
     private void setupCallUI(String type, String targetName) {
         audioManager.setMode(AudioManager.MODE_IN_COMMUNICATION);
-        audioManager.setSpeakerphoneOn(true);
-        isSpeakerOn = true; isMuted = false; isCamOff = false;
+        audioManager.setSpeakerphoneOn("video".equals(type));
+        isSpeakerOn = "video".equals(type);
+        isMuted = false;
+        isCamOff = false;
         btnMic.setImageResource(R.drawable.ic_mic); btnMic.setAlpha(1.0f);
-        btnCam.setAlpha(1.0f); btnSpeaker.setAlpha(1.0f);
+        btnCam.setAlpha(1.0f);
+        btnSpeaker.setAlpha(isSpeakerOn ? 1.0f : 0.45f);
 
         minimizeCallUI(false);
         callOverlay.setVisibility(View.VISIBLE);
@@ -752,8 +810,8 @@ public class ChatActivity extends AppCompatActivity {
     private int dpToPx(int dp) { return Math.round(dp * getResources().getDisplayMetrics().density); }
 
     private void startCallTimer() {
+        if (timerRunnable != null) return;
         callStartTime = System.currentTimeMillis();
-        if (timerRunnable != null) timerHandler.removeCallbacks(timerRunnable);
         timerRunnable = new Runnable() {
             @Override public void run() {
                 long sec = (System.currentTimeMillis() - callStartTime) / 1000;
@@ -766,7 +824,8 @@ public class ChatActivity extends AppCompatActivity {
 
     private void hangupCall(boolean notifyFirebase) {
         stopRingtone();
-        if (timerRunnable != null) timerHandler.removeCallbacks(timerRunnable);
+        isAutoAccepting = false;
+        if (timerRunnable != null) { timerHandler.removeCallbacks(timerRunnable); timerRunnable = null; }
         if (callListener != null) { callListener.remove(); callListener = null; }
         if (candListener != null) { candListener.remove(); candListener = null; }
         webRTCManager.endCall();
@@ -783,9 +842,11 @@ public class ChatActivity extends AppCompatActivity {
     protected void onDestroy() {
         super.onDestroy();
         stopRingtone();
+        if (callOverlay != null && callOverlay.getVisibility() == View.VISIBLE) hangupCall(true);
         if (!isGlobal && myUid != null) db.collection("users").document(myUid).update("typingTo", "");
         if (msgListener != null) msgListener.remove();
         if (peerListener != null) peerListener.remove();
+        if (incomingListener != null) incomingListener.remove();
         if (recordRunnable != null) recordHandler.removeCallbacks(recordRunnable);
         if (timerRunnable != null) timerHandler.removeCallbacks(timerRunnable);
         if (adapter != null) adapter.releasePlayer();
