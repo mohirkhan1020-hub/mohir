@@ -1,10 +1,15 @@
 package com.wevlo.amohir;
 
+import android.app.AlertDialog;
 import android.content.Intent;
 import android.content.SharedPreferences;
+import android.graphics.Color;
 import android.os.Bundle;
+import android.util.Log;
 import android.widget.Button;
 import android.widget.EditText;
+import android.widget.ScrollView;
+import android.widget.TextView;
 import android.widget.Toast;
 
 import androidx.appcompat.app.AppCompatActivity;
@@ -41,22 +46,55 @@ public class LoginActivity extends AppCompatActivity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
 
-        SharedPreferences prefs = getSharedPreferences("DivineWA", MODE_PRIVATE);
-        String savedPhone = prefs.getString("my_phone", "");
-        if (!savedPhone.isEmpty()) {
-            startActivity(new Intent(this, MainActivity.class));
-            finish();
-            return;
+        // ক্র্যাশ হলে এরর সেভ করে রাখার হ্যান্ডলার
+        Thread.setDefaultUncaughtExceptionHandler((t, e) -> {
+            String err = Log.getStackTraceString(e);
+            getSharedPreferences("CrashLog", MODE_PRIVATE).edit().putString("err", err).apply();
+            System.exit(1);
+        });
+
+        try {
+            String lastCrash = getSharedPreferences("CrashLog", MODE_PRIVATE).getString("err", "");
+            if (!lastCrash.isEmpty()) {
+                getSharedPreferences("CrashLog", MODE_PRIVATE).edit().clear().apply();
+                new AlertDialog.Builder(this)
+                        .setTitle("Previous Crash Error")
+                        .setMessage(lastCrash)
+                        .setPositiveButton("OK", null)
+                        .show();
+            }
+
+            SharedPreferences prefs = getSharedPreferences("DivineWA", MODE_PRIVATE);
+            String savedPhone = prefs.getString("my_phone", "");
+            if (!savedPhone.isEmpty()) {
+                startActivity(new Intent(this, MainActivity.class));
+                finish();
+                return;
+            }
+
+            setContentView(R.layout.activity_login);
+            initFirebase();
+
+            etLoginPhone = findViewById(R.id.etLoginPhone);
+            etLoginName = findViewById(R.id.etLoginName);
+            btnContinue = findViewById(R.id.btnContinue);
+
+            btnContinue.setOnClickListener(v -> attemptLogin());
+        } catch (Throwable t) {
+            showCrashOnScreen(Log.getStackTraceString(t));
         }
+    }
 
-        setContentView(R.layout.activity_login);
-        initFirebase();
-
-        etLoginPhone = findViewById(R.id.etLoginPhone);
-        etLoginName = findViewById(R.id.etLoginName);
-        btnContinue = findViewById(R.id.btnContinue);
-
-        btnContinue.setOnClickListener(v -> attemptLogin());
+    private void showCrashOnScreen(String text) {
+        ScrollView sv = new ScrollView(this);
+        TextView tv = new TextView(this);
+        tv.setText(text);
+        tv.setTextColor(Color.WHITE);
+        tv.setBackgroundColor(Color.parseColor("#8B0000"));
+        tv.setPadding(32, 64, 32, 32);
+        tv.setTextIsSelectable(true);
+        sv.addView(tv);
+        setContentView(sv);
     }
 
     private void initFirebase() {
