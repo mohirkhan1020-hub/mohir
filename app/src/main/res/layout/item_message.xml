@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
     android:id="@+id/msgRoot"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
@@ -11,21 +12,22 @@
         android:id="@+id/bubbleContainer"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:maxWidth="285dp"
+        android:maxWidth="290dp"
         android:orientation="vertical"
-        android:padding="9dp">
+        android:paddingHorizontal="10dp"
+        android:paddingTop="7dp"
+        android:paddingBottom="6dp">
 
         <TextView
             android:id="@+id/tvSender"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_marginBottom="3dp"
-            android:textColor="#00A884"
-            android:textSize="11sp"
+            android:textColor="#25D366"
+            android:textSize="12sp"
             android:textStyle="bold"
             android:visibility="gone" />
 
-        <!-- Reply Quote বক্স -->
         <LinearLayout
             android:id="@+id/replyBox"
             android:layout_width="match_parent"
@@ -33,92 +35,103 @@
             android:layout_marginBottom="5dp"
             android:background="@drawable/bg_wa_reply_bar"
             android:orientation="vertical"
-            android:padding="7dp"
+            android:paddingStart="10dp"
+            android:paddingEnd="8dp"
+            android:paddingVertical="6dp"
             android:visibility="gone">
 
-            <TextView
-                android:id="@+id/tvReplyQuoteSender"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:textColor="#00A884"
-                android:textSize="11sp"
-                android:textStyle="bold" />
-
-            <TextView
-                android:id="@+id/tvReplyQuoteText"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:ellipsize="end"
-                android:maxLines="2"
-                android:textColor="#B0BEC5"
-                android:textSize="12sp" />
+            <TextView android:id="@+id/tvReplyQuoteSender" android:layout_width="wrap_content" android:layout_height="wrap_content" android:textColor="#25D366" android:textSize="11.5sp" android:textStyle="bold" />
+            <TextView android:id="@+id/tvReplyQuoteText" android:layout_width="wrap_content" android:layout_height="wrap_content" android:ellipsize="end" android:maxLines="2" android:textColor="#B0BEC5" android:textSize="12sp" />
         </LinearLayout>
 
-        <!-- ছবি -->
-        <ImageView
+        <com.google.android.material.imageview.ShapeableImageView
             android:id="@+id/ivMedia"
-            android:layout_width="220dp"
-            android:layout_height="220dp"
+            android:layout_width="225dp"
+            android:layout_height="225dp"
             android:layout_marginBottom="4dp"
             android:scaleType="centerCrop"
-            android:visibility="gone" />
+            android:visibility="gone"
+            app:shapeAppearanceOverlay="@style/RoundedImage" />
 
-        <!-- ভয়েস নোট প্লেয়ার -->
         <LinearLayout
             android:id="@+id/voiceBox"
-            android:layout_width="200dp"
+            android:layout_width="215dp"
             android:layout_height="wrap_content"
             android:gravity="center_vertical"
             android:orientation="horizontal"
             android:paddingVertical="4dp"
             android:visibility="gone">
 
-            <Button
+            <ImageButton
                 android:id="@+id/btnPlayVoice"
                 android:layout_width="36dp"
                 android:layout_height="36dp"
-                android:backgroundTint="#00A884"
-                android:padding="0dp"
-                android:text="▶"
-                android:textColor="#FFFFFF"
-                android:textSize="14sp" />
+                android:background="@drawable/bg_wa_circle_green"
+                android:src="@drawable/ic_play" />
 
-            <TextView
-                android:id="@+id/tvVoiceLabel"
-                android:layout_width="wrap_content"
+            <LinearLayout
+                android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_marginStart="10dp"
-                android:text="🎤 Voice Note"
-                android:textColor="#E9EDEF"
-                android:textSize="13sp" />
+                android:layout_weight="1"
+                android:orientation="vertical">
+
+                <ProgressBar
+                    style="?android:attr/progressBarStyleHorizontal"
+                    android:layout_width="match_parent"
+                    android:layout_height="4dp"
+                    android:progress="45"
+                    android:progressTint="#25D366"
+                    android:progressBackgroundTint="#4DFFFFFF" />
+
+                <TextView
+                    android:id="@+id/tvVoiceLabel"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="4dp"
+                    android:text="0:05"
+                    android:textColor="#B0BEC5"
+                    android:textSize="11sp" />
+            </LinearLayout>
         </LinearLayout>
 
-        <!-- টেক্সট মেসেজ -->
         <TextView
             android:id="@+id/tvMessage"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:textColor="#E9EDEF"
-            android:textSize="14.5sp" />
+            android:textSize="15sp" />
 
-        <!-- সময় ও ডাবল টিক -->
-        <TextView
-            android:id="@+id/tvMeta"
+        <LinearLayout
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_gravity="end"
             android:layout_marginTop="2dp"
-            android:text="10:30 PM ✓✓"
-            android:textColor="#99FFFFFF"
-            android:textSize="10.5sp" />
+            android:gravity="center_vertical"
+            android:orientation="horizontal">
+
+            <TextView
+                android:id="@+id/tvMeta"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="10:30 PM"
+                android:textColor="#99FFFFFF"
+                android:textSize="10.5sp" />
+
+            <ImageView
+                android:id="@+id/ivTicks"
+                android:layout_width="15dp"
+                android:layout_height="15dp"
+                android:layout_marginStart="4dp"
+                android:src="@drawable/ic_done_all" />
+        </LinearLayout>
     </LinearLayout>
 
-    <!-- ইমোজি রিঅ্যাকশন ব্যাজ -->
     <TextView
         android:id="@+id/tvReaction"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:layout_marginTop="-6dp"
+        android:layout_marginTop="-7dp"
         android:background="@drawable/bg_wa_badge"
         android:paddingHorizontal="7dp"
         android:paddingVertical="2dp"
