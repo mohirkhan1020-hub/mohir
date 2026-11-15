@@ -11,7 +11,7 @@ import android.view.Gravity;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
-import android.widget.Button;
+import android.widget.ImageButton;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.TextView;
@@ -33,11 +33,11 @@ public class MessageAdapter extends RecyclerView.Adapter<MessageAdapter.MsgViewH
     }
 
     private final List<MessageModel> messages;
-    private String currentUserId;
+    private final String currentUserId;
     private final boolean showSenderName;
     private final OnMessageActionListener actionListener;
     private MediaPlayer activePlayer;
-    private Button activePlayBtn;
+    private ImageButton activePlayBtn;
 
     public MessageAdapter(List<MessageModel> messages, String currentUserId, boolean showSenderName, OnMessageActionListener actionListener) {
         this.messages = messages;
@@ -49,8 +49,7 @@ public class MessageAdapter extends RecyclerView.Adapter<MessageAdapter.MsgViewH
     @NonNull
     @Override
     public MsgViewHolder onCreateViewHolder(@NonNull ViewGroup parent, int viewType) {
-        View view = LayoutInflater.from(parent.getContext()).inflate(R.layout.item_message, parent, false);
-        return new MsgViewHolder(view);
+        return new MsgViewHolder(LayoutInflater.from(parent.getContext()).inflate(R.layout.item_message, parent, false));
     }
 
     @Override
@@ -68,7 +67,6 @@ public class MessageAdapter extends RecyclerView.Adapter<MessageAdapter.MsgViewH
             h.tvSender.setVisibility(View.GONE);
         }
 
-        // Reply Quote
         if (m.getReplyToText() != null && !m.getReplyToText().isEmpty()) {
             h.replyBox.setVisibility(View.VISIBLE);
             h.tvReplyQuoteSender.setText(m.getReplyToSender() != null ? m.getReplyToSender() : "Message");
@@ -77,7 +75,6 @@ public class MessageAdapter extends RecyclerView.Adapter<MessageAdapter.MsgViewH
             h.replyBox.setVisibility(View.GONE);
         }
 
-        // Content Type
         h.ivMedia.setVisibility(View.GONE);
         h.voiceBox.setVisibility(View.GONE);
         h.tvMessage.setVisibility(View.GONE);
@@ -91,28 +88,25 @@ public class MessageAdapter extends RecyclerView.Adapter<MessageAdapter.MsgViewH
             }
         } else if ("voice".equals(m.getType()) && m.getMediaUrl() != null) {
             h.voiceBox.setVisibility(View.VISIBLE);
-            String dur = m.getVoiceDuration() != null ? m.getVoiceDuration() : "0:05";
-            h.tvVoiceLabel.setText("🎤 Voice (" + dur + ")");
-            h.btnPlayVoice.setText("▶");
+            h.tvVoiceLabel.setText(m.getVoiceDuration() != null ? m.getVoiceDuration() : "0:05");
+            h.btnPlayVoice.setImageResource(R.drawable.ic_play);
             h.btnPlayVoice.setOnClickListener(v -> playVoiceNote(v.getContext(), m.getMediaUrl(), h.btnPlayVoice));
         } else {
             h.tvMessage.setVisibility(View.VISIBLE);
             h.tvMessage.setText(m.getText() != null ? m.getText() : "");
         }
 
-        // Timestamp + Blue Ticks
         String timeStr = m.getTimestamp() > 0
-                ? new SimpleDateFormat("hh:mm a", Locale.getDefault()).format(new Date(m.getTimestamp()))
-                : "";
+                ? new SimpleDateFormat("hh:mm a", Locale.getDefault()).format(new Date(m.getTimestamp())) : "";
+        h.tvMeta.setText(timeStr);
+
         if (isOwn) {
-            h.tvMeta.setText(timeStr + " ✓✓");
-            h.tvMeta.setTextColor(m.isSeen() ? Color.parseColor("#53BDEB") : Color.parseColor("#B0BEC5"));
+            h.ivTicks.setVisibility(View.VISIBLE);
+            h.ivTicks.setColorFilter(m.isSeen() ? Color.parseColor("#53BDEB") : Color.parseColor("#B0BEC5"));
         } else {
-            h.tvMeta.setText(timeStr);
-            h.tvMeta.setTextColor(Color.parseColor("#8696A0"));
+            h.ivTicks.setVisibility(View.GONE);
         }
 
-        // Reaction
         if (m.getReaction() != null && !m.getReaction().isEmpty()) {
             h.tvReaction.setVisibility(View.VISIBLE);
             h.tvReaction.setText(m.getReaction());
@@ -126,29 +120,28 @@ public class MessageAdapter extends RecyclerView.Adapter<MessageAdapter.MsgViewH
         });
     }
 
-    private void playVoiceNote(Context ctx, String base64Audio, Button btn) {
+    private void playVoiceNote(Context ctx, String base64Audio, ImageButton btn) {
         try {
             if (activePlayer != null) {
                 activePlayer.stop();
                 activePlayer.release();
                 activePlayer = null;
-                if (activePlayBtn != null) activePlayBtn.setText("▶");
+                if (activePlayBtn != null) activePlayBtn.setImageResource(R.drawable.ic_play);
                 if (activePlayBtn == btn) { activePlayBtn = null; return; }
             }
             byte[] audioBytes = Base64.decode(base64Audio, Base64.DEFAULT);
             File temp = File.createTempFile("play_", ".m4a", ctx.getCacheDir());
-            try (FileOutputStream fos = new FileOutputStream(temp)) {
-                fos.write(audioBytes);
-            }
+            try (FileOutputStream fos = new FileOutputStream(temp)) { fos.write(audioBytes); }
+
             activePlayer = new MediaPlayer();
             activePlayBtn = btn;
             activePlayer.setDataSource(temp.getAbsolutePath());
             activePlayer.setOnPreparedListener(mp -> {
                 mp.start();
-                btn.setText("⏸");
+                btn.setImageResource(android.R.drawable.ic_media_pause);
             });
             activePlayer.setOnCompletionListener(mp -> {
-                btn.setText("▶");
+                btn.setImageResource(R.drawable.ic_play);
                 mp.release();
                 activePlayer = null;
                 activePlayBtn = null;
@@ -185,24 +178,25 @@ public class MessageAdapter extends RecyclerView.Adapter<MessageAdapter.MsgViewH
     static class MsgViewHolder extends RecyclerView.ViewHolder {
         LinearLayout msgRoot, bubbleContainer, replyBox, voiceBox;
         TextView tvSender, tvReplyQuoteSender, tvReplyQuoteText, tvMessage, tvMeta, tvReaction, tvVoiceLabel;
-        ImageView ivMedia;
-        Button btnPlayVoice;
+        ImageView ivMedia, ivTicks;
+        ImageButton btnPlayVoice;
 
-        MsgViewHolder(@NonNull View itemView) {
-            super(itemView);
-            msgRoot = itemView.findViewById(R.id.msgRoot);
-            bubbleContainer = itemView.findViewById(R.id.bubbleContainer);
-            tvSender = itemView.findViewById(R.id.tvSender);
-            replyBox = itemView.findViewById(R.id.replyBox);
-            tvReplyQuoteSender = itemView.findViewById(R.id.tvReplyQuoteSender);
-            tvReplyQuoteText = itemView.findViewById(R.id.tvReplyQuoteText);
-            ivMedia = itemView.findViewById(R.id.ivMedia);
-            voiceBox = itemView.findViewById(R.id.voiceBox);
-            btnPlayVoice = itemView.findViewById(R.id.btnPlayVoice);
-            tvVoiceLabel = itemView.findViewById(R.id.tvVoiceLabel);
-            tvMessage = itemView.findViewById(R.id.tvMessage);
-            tvMeta = itemView.findViewById(R.id.tvMeta);
-            tvReaction = itemView.findViewById(R.id.tvReaction);
+        MsgViewHolder(@NonNull View v) {
+            super(v);
+            msgRoot = v.findViewById(R.id.msgRoot);
+            bubbleContainer = v.findViewById(R.id.bubbleContainer);
+            tvSender = v.findViewById(R.id.tvSender);
+            replyBox = v.findViewById(R.id.replyBox);
+            tvReplyQuoteSender = v.findViewById(R.id.tvReplyQuoteSender);
+            tvReplyQuoteText = v.findViewById(R.id.tvReplyQuoteText);
+            ivMedia = v.findViewById(R.id.ivMedia);
+            voiceBox = v.findViewById(R.id.voiceBox);
+            btnPlayVoice = v.findViewById(R.id.btnPlayVoice);
+            tvVoiceLabel = v.findViewById(R.id.tvVoiceLabel);
+            tvMessage = v.findViewById(R.id.tvMessage);
+            tvMeta = v.findViewById(R.id.tvMeta);
+            ivTicks = v.findViewById(R.id.ivTicks);
+            tvReaction = v.findViewById(R.id.tvReaction);
         }
     }
 }
