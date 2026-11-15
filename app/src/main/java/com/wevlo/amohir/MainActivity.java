@@ -8,6 +8,8 @@ import android.content.pm.PackageManager;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.Color;
+import android.media.Ringtone;
+import android.media.RingtoneManager;
 import android.net.Uri;
 import android.os.Bundle;
 import android.os.Handler;
@@ -87,6 +89,7 @@ public class MainActivity extends AppCompatActivity {
     private String currentFilter = "all";
     private boolean isPickingAvatar = false;
     private Uri cameraStatusUri;
+    private Ringtone ringtone;
     private final Handler storyHandler = new Handler(Looper.getMainLooper());
     private Runnable storyRunnable;
 
@@ -406,6 +409,7 @@ public class MainActivity extends AppCompatActivity {
         db.collection("calls").whereEqualTo("status", "calling")
                 .addSnapshotListener((snaps, err) -> {
                     if (snaps == null || currentUser == null || ChatActivity.isChatOpen) {
+                        stopRingtone();
                         incomingOverlay.setVisibility(View.GONE);
                         return;
                     }
@@ -414,7 +418,9 @@ public class MainActivity extends AppCompatActivity {
                     for (DocumentSnapshot d : snaps.getDocuments()) {
                         String callerId = d.getString("callerId");
                         String receiverId = d.getString("receiverId");
-                        if (!uid.equals(callerId) && (uid.equals(receiverId) || "live_channel".equals(d.getId()))) {
+                        Long createdAt = d.getLong("createdAt");
+                        boolean isFresh = createdAt == null || (System.currentTimeMillis() - createdAt) < 60000;
+                        if (isFresh && !uid.equals(callerId) && (uid.equals(receiverId) || "live_channel".equals(d.getId()))) {
                             foundCall = d;
                             break;
                         }
@@ -426,12 +432,15 @@ public class MainActivity extends AppCompatActivity {
                         String ctype = callDoc.getString("type");
                         tvCallerName.setText(cname != null ? cname : "Friend");
                         tvCallType.setText("video".equals(ctype) ? "WhatsApp video call" : "WhatsApp voice call");
+                        playRingtone();
 
                         findViewById(R.id.btnRejectCall).setOnClickListener(v -> {
+                            stopRingtone();
                             incomingOverlay.setVisibility(View.GONE);
                             callDoc.getReference().update("status", "ended");
                         });
                         findViewById(R.id.btnAcceptCall).setOnClickListener(v -> {
+                            stopRingtone();
                             incomingOverlay.setVisibility(View.GONE);
                             Intent i = new Intent(MainActivity.this, ChatActivity.class);
                             i.putExtra("isGlobal", "live_channel".equals(callDoc.getId()));
@@ -441,9 +450,25 @@ public class MainActivity extends AppCompatActivity {
                             startActivity(i);
                         });
                     } else {
+                        stopRingtone();
                         incomingOverlay.setVisibility(View.GONE);
                     }
                 });
+    }
+
+    private void playRingtone() {
+        try {
+            if (ringtone == null) {
+                ringtone = RingtoneManager.getRingtone(this, RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE));
+            }
+            if (ringtone != null && !ringtone.isPlaying()) ringtone.play();
+        } catch (Exception ignored) {}
+    }
+
+    private void stopRingtone() {
+        try {
+            if (ringtone != null && ringtone.isPlaying()) ringtone.stop();
+        } catch (Exception ignored) {}
     }
 
     private void openFullscreenStory(StatusModel s) {
@@ -567,6 +592,14 @@ public class MainActivity extends AppCompatActivity {
     @Override
     protected void onPause() {
         super.onPause();
+        stopRingtone();
         if (currentUser != null) db.collection("users").document(currentUser.getUid()).update("online", false, "lastSeen", System.currentTimeMillis());
+    }
+
+    @Override
+    protected void onDestroy() {
+        super.onDestroy();
+        stopRingtone();
+        if (storyRunnable != null) storyHandler.removeCallbacks(storyRunnable);
     }
 }
