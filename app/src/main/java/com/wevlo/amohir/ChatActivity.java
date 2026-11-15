@@ -45,7 +45,6 @@ import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
 
 import com.google.firebase.auth.FirebaseAuth;
-import com.google.firebase.auth.FirebaseUser;
 import com.google.firebase.firestore.DocumentChange;
 import com.google.firebase.firestore.DocumentReference;
 import com.google.firebase.firestore.DocumentSnapshot;
@@ -84,7 +83,6 @@ public class ChatActivity extends AppCompatActivity {
 
     private FirebaseFirestore db;
     private String myUid, myName, peerUid, peerName, chatId, callDocId;
-    private boolean isGlobal;
 
     private TextView tvChatName, tvChatStatus, tvChatAvatar, tvReplySender, tvReplyText, tvRecordTime;
     private TextView tvCallerName, tvCallType, tvActiveTarget, tvCallTimer;
@@ -149,25 +147,22 @@ public class ChatActivity extends AppCompatActivity {
         setContentView(R.layout.activity_chat);
 
         db = FirebaseFirestore.getInstance();
-        FirebaseUser currentUser = FirebaseAuth.getInstance().getCurrentUser();
-        if (currentUser == null) { finish(); return; }
+        if (FirebaseAuth.getInstance().getCurrentUser() == null) {
+            FirebaseAuth.getInstance().signInAnonymously();
+        }
 
-        myUid = currentUser.getUid();
+        myUid = getSharedPreferences("DivineWA", MODE_PRIVATE).getString("my_phone", "");
         myName = getSharedPreferences("DivineWA", MODE_PRIVATE).getString("name", "User");
-        isGlobal = getIntent().getBooleanExtra("isGlobal", false);
         peerUid = getIntent().getStringExtra("peerUid");
         peerName = getIntent().getStringExtra("peerName");
 
-        if (isGlobal || peerUid == null) {
-            isGlobal = true;
-            chatId = "global_room";
-            callDocId = "live_channel";
-            peerUid = "global_room";
-            peerName = "Global Community";
-        } else {
-            chatId = myUid.compareTo(peerUid) < 0 ? myUid + "_" + peerUid : peerUid + "_" + myUid;
-            callDocId = "call_" + chatId;
+        if (myUid.isEmpty() || peerUid == null || peerUid.isEmpty()) {
+            finish();
+            return;
         }
+
+        chatId = myUid.compareTo(peerUid) < 0 ? myUid + "_" + peerUid : peerUid + "_" + myUid;
+        callDocId = "call_" + chatId;
 
         initViews();
         initWebRTCViews();
@@ -222,13 +217,9 @@ public class ChatActivity extends AppCompatActivity {
         btnCam = findViewById(R.id.btnCam);
         btnSpeaker = findViewById(R.id.btnSpeaker);
 
-        tvChatName.setText(peerName != null ? peerName : "Chat");
+        tvChatName.setText(peerName != null ? peerName : peerUid);
         String peerAvatar = getIntent().getStringExtra("peerAvatar");
-        if (isGlobal) {
-            tvChatAvatar.setText("🌍");
-            tvChatStatus.setText("tap for group chat");
-            viewChatOnline.setVisibility(View.VISIBLE);
-        } else if (peerAvatar != null && !peerAvatar.isEmpty()) {
+        if (peerAvatar != null && !peerAvatar.isEmpty()) {
             try {
                 byte[] b = Base64.decode(peerAvatar, Base64.DEFAULT);
                 ivChatAvatar.setImageBitmap(BitmapFactory.decodeByteArray(b, 0, b.length));
@@ -239,7 +230,7 @@ public class ChatActivity extends AppCompatActivity {
             tvChatAvatar.setText(peerName != null && !peerName.isEmpty() ? peerName.substring(0, 1).toUpperCase() : "👤");
         }
 
-        adapter = new MessageAdapter(messageList, myUid, isGlobal, this::showMessageOptionsDialog);
+        adapter = new MessageAdapter(messageList, myUid, false, this::showMessageOptionsDialog);
         rvMessages.setLayoutManager(new LinearLayoutManager(this));
         rvMessages.setAdapter(adapter);
 
@@ -265,7 +256,7 @@ public class ChatActivity extends AppCompatActivity {
             @Override public void onTextChanged(CharSequence s, int a, int b, int c) {
                 boolean hasText = s.toString().trim().length() > 0;
                 btnSendOrMic.setImageResource(hasText ? R.drawable.ic_send : R.drawable.ic_mic);
-                if (!isGlobal) db.collection("users").document(myUid).update("typingTo", hasText ? peerUid : "");
+                db.collection("users").document(myUid).update("typingTo", hasText ? peerUid : "");
             }
             @Override public void afterTextChanged(Editable s) {}
         });
@@ -352,9 +343,11 @@ public class ChatActivity extends AppCompatActivity {
     }
 
     private void listenPeerStatus() {
-        if (isGlobal || peerUid == null) return;
         peerListener = db.collection("users").document(peerUid).addSnapshotListener((snap, err) -> {
             if (snap == null || !snap.exists()) return;
+            String latestName = snap.getString("name");
+            if (latestName != null && !latestName.isEmpty()) tvChatName.setText(latestName);
+
             boolean isOnline = Boolean.TRUE.equals(snap.getBoolean("online"));
             String typingTo = snap.getString("typingTo");
             Long lastSeen = snap.getLong("lastSeen");
@@ -384,13 +377,11 @@ public class ChatActivity extends AppCompatActivity {
         }
         db.collection("chats").document(chatId).collection("messages").add(msg);
 
-        if (!isGlobal) {
-            Map<String, Object> meta = new HashMap<>();
-            meta.put("participants", Arrays.asList(myUid, peerUid));
-            meta.put("lastMessage", "image".equals(type) ? "📷 Photo" : ("voice".equals(type) ? "🎤 Voice message" : text));
-            meta.put("lastTimestamp", now);
-            db.collection("chats").document(chatId).set(meta, SetOptions.merge());
-        }
+        Map<String, Object> meta = new HashMap<>();
+        meta.put("participants", Arrays.asList(myUid, peerUid));
+        meta.put("lastMessage", "image".equals(type) ? "📷 Photo" : ("voice".equals(type) ? "🎤 Voice message" : text));
+        meta.put("lastTimestamp", now);
+        db.collection("chats").document(chatId).set(meta, SetOptions.merge());
     }
 
     private void showMessageOptionsDialog(MessageModel m) {
@@ -526,7 +517,6 @@ public class ChatActivity extends AppCompatActivity {
         dialog.show();
     }
 
-    /* 🎥 WebRTC কল সিস্টেম (সম্পূর্ণ ফিক্সড) */
     private void initWebRTCViews() {
         audioManager = (AudioManager) getSystemService(Context.AUDIO_SERVICE);
         eglBase = EglBase.create();
@@ -754,16 +744,20 @@ public class ChatActivity extends AppCompatActivity {
 
     private void logCallHistory(String type) {
         Map<String, Object> log = new HashMap<>();
-        log.put("callerId", myUid); log.put("callerName", myName);
-        log.put("receiverId", peerUid); log.put("receiverName", peerName);
-        log.put("type", type); log.put("timestamp", System.currentTimeMillis());
+        log.put("callerId", myUid);
+        log.put("callerName", myName);
+        log.put("receiverId", peerUid);
+        log.put("receiverName", peerName);
+        log.put("participants", Arrays.asList(myUid, peerUid));
+        log.put("type", type);
+        log.put("timestamp", System.currentTimeMillis());
         db.collection("call_logs").add(log);
     }
 
     private void playRingtone() {
         try {
-            ringtone = RingtoneManager.getRingtone(this, RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE));
-            if (ringtone != null) ringtone.play();
+            if (ringtone == null) ringtone = RingtoneManager.getRingtone(this, RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE));
+            if (ringtone != null && !ringtone.isPlaying()) ringtone.play();
         } catch (Exception ignored) {}
     }
 
@@ -843,7 +837,7 @@ public class ChatActivity extends AppCompatActivity {
         super.onDestroy();
         stopRingtone();
         if (callOverlay != null && callOverlay.getVisibility() == View.VISIBLE) hangupCall(true);
-        if (!isGlobal && myUid != null) db.collection("users").document(myUid).update("typingTo", "");
+        db.collection("users").document(myUid).update("typingTo", "");
         if (msgListener != null) msgListener.remove();
         if (peerListener != null) peerListener.remove();
         if (incomingListener != null) incomingListener.remove();
