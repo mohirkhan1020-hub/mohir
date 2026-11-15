@@ -15,6 +15,7 @@ import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
 import android.text.Editable;
+import android.text.InputType;
 import android.text.TextWatcher;
 import android.util.Base64;
 import android.view.View;
@@ -39,9 +40,9 @@ import com.google.android.material.bottomnavigation.BottomNavigationView;
 import com.google.firebase.FirebaseApp;
 import com.google.firebase.FirebaseOptions;
 import com.google.firebase.auth.FirebaseAuth;
-import com.google.firebase.auth.FirebaseUser;
 import com.google.firebase.firestore.DocumentSnapshot;
 import com.google.firebase.firestore.FirebaseFirestore;
+import com.google.firebase.firestore.ListenerRegistration;
 import com.google.firebase.firestore.Query;
 import com.google.firebase.firestore.SetOptions;
 
@@ -50,18 +51,21 @@ import java.io.File;
 import java.io.InputStream;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Date;
 import java.util.HashMap;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 
 public class MainActivity extends AppCompatActivity {
 
     private FirebaseAuth auth;
     private FirebaseFirestore db;
-    private FirebaseUser currentUser;
-    private String myName, myAbout, myAvatarBase64;
+    private String myPhone, myName, myAbout, myAvatarBase64;
 
     private TextView tvAppTitle, tvCallerName, tvCallType, chipAll, chipOnline, chipGroups;
     private TextView tvStoryTextFull, tvStoryAuthor, tvStoryTime;
@@ -74,10 +78,11 @@ public class MainActivity extends AppCompatActivity {
     private ImageView ivMyStatusAvatar, ivStoryFull;
     private ProgressBar storyProgress;
 
-    private final List<UserModel> allUsers = new ArrayList<>();
-    private final List<UserModel> filteredUsers = new ArrayList<>();
+    private final Map<String, UserModel> peerUsersMap = new LinkedHashMap<>();
+    private final Map<String, ListenerRegistration> peerListeners = new HashMap<>();
     private final Map<String, String> lastMsgMap = new HashMap<>();
     private final Map<String, Long> lastTimeMap = new HashMap<>();
+    private final List<UserModel> filteredUsers = new ArrayList<>();
     private UserAdapter userAdapter;
 
     private final List<StatusModel> statusList = new ArrayList<>();
@@ -124,11 +129,19 @@ public class MainActivity extends AppCompatActivity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        setContentView(R.layout.activity_main);
 
+        SharedPreferences prefs = getSharedPreferences("DivineWA", MODE_PRIVATE);
+        myPhone = prefs.getString("my_phone", "");
+        if (myPhone.isEmpty()) {
+            startActivity(new Intent(this, LoginActivity.class));
+            finish();
+            return;
+        }
+
+        setContentView(R.layout.activity_main);
         initFirebase();
         initViews();
-        initAuth();
+        initSession();
     }
 
     private void initFirebase() {
@@ -161,6 +174,7 @@ public class MainActivity extends AppCompatActivity {
         chipAll = findViewById(R.id.chipAll);
         chipOnline = findViewById(R.id.chipOnline);
         chipGroups = findViewById(R.id.chipGroups);
+        chipGroups.setVisibility(View.GONE); // শুধুমাত্র প্রাইভেট চ্যাট
 
         incomingOverlay = findViewById(R.id.incomingOverlay);
         tvCallerName = findViewById(R.id.tvCallerName);
@@ -173,14 +187,7 @@ public class MainActivity extends AppCompatActivity {
         tvStoryTime = findViewById(R.id.tvStoryTime);
         storyProgress = findViewById(R.id.storyProgress);
 
-        userAdapter = new UserAdapter(filteredUsers, user -> {
-            Intent i = new Intent(MainActivity.this, ChatActivity.class);
-            i.putExtra("peerUid", user.getUid());
-            i.putExtra("peerName", user.getName());
-            i.putExtra("peerAvatar", user.getAvatarBase64());
-            i.putExtra("isGlobal", user.isGlobalRoom());
-            startActivity(i);
-        });
+        userAdapter = new UserAdapter(filteredUsers, user -> openPrivateChat(user.getUid(), user.getName(), user.getAvatarBase64()));
         rvChats.setLayoutManager(new LinearLayoutManager(this));
         rvChats.setAdapter(userAdapter);
 
@@ -188,7 +195,7 @@ public class MainActivity extends AppCompatActivity {
         rvStatuses.setLayoutManager(new LinearLayoutManager(this));
         rvStatuses.setAdapter(statusAdapter);
 
-        callAdapter = new CallLogAdapter(callList, null);
+        callAdapter = new CallLogAdapter(callList, myPhone);
         rvCalls.setLayoutManager(new LinearLayoutManager(this));
         rvCalls.setAdapter(callAdapter);
 
@@ -213,7 +220,6 @@ public class MainActivity extends AppCompatActivity {
 
         chipAll.setOnClickListener(v -> selectChip("all"));
         chipOnline.setOnClickListener(v -> selectChip("online"));
-        chipGroups.setOnClickListener(v -> selectChip("groups"));
 
         findViewById(R.id.btnSearch).setOnClickListener(v -> {
             if (etSearch.getVisibility() == View.GONE) {
@@ -234,20 +240,16 @@ public class MainActivity extends AppCompatActivity {
         });
 
         findViewById(R.id.btnCameraTop).setOnClickListener(v -> openCameraStatus());
-        findViewById(R.id.btnProfileEdit).setOnClickListener(v -> showProfileSettingsDialog());
+        findViewById(R.id.btnProfileEdit).setOnClickListener(v -> showMainMenuDialog());
         findViewById(R.id.btnMyStatus).setOnClickListener(v -> showAddStatusDialog());
         findViewById(R.id.btnCloseStory).setOnClickListener(v -> closeFullscreenStory());
         statusViewerOverlay.setOnClickListener(v -> closeFullscreenStory());
 
         fabAction.setOnClickListener(v -> {
-            int sel = bottomNav.getSelectedItemId();
-            if (sel == R.id.nav_updates) {
+            if (bottomNav.getSelectedItemId() == R.id.nav_updates) {
                 showAddStatusDialog();
             } else {
-                Intent i = new Intent(MainActivity.this, ChatActivity.class);
-                i.putExtra("isGlobal", true);
-                i.putExtra("peerName", "Global Community");
-                startActivity(i);
+                showFindUserByPhoneDialog();
             }
         });
     }
@@ -256,34 +258,33 @@ public class MainActivity extends AppCompatActivity {
         currentFilter = chip;
         chipAll.setBackgroundResource("all".equals(chip) ? R.drawable.bg_wa_chip_active : R.drawable.bg_wa_chip);
         chipAll.setTextColor(Color.parseColor("all".equals(chip) ? "#25D366" : "#8696A0"));
-
         chipOnline.setBackgroundResource("online".equals(chip) ? R.drawable.bg_wa_chip_active : R.drawable.bg_wa_chip);
         chipOnline.setTextColor(Color.parseColor("online".equals(chip) ? "#25D366" : "#8696A0"));
-
-        chipGroups.setBackgroundResource("groups".equals(chip) ? R.drawable.bg_wa_chip_active : R.drawable.bg_wa_chip);
-        chipGroups.setTextColor(Color.parseColor("groups".equals(chip) ? "#25D366" : "#8696A0"));
         applyFilters();
     }
 
-    private void initAuth() {
+    private void initSession() {
         SharedPreferences prefs = getSharedPreferences("DivineWA", MODE_PRIVATE);
-        myName = prefs.getString("name", "User " + (int) (100 + Math.random() * 900));
+        myName = prefs.getString("name", "User");
         myAbout = prefs.getString("about", "Hey there! I am using WhatsApp.");
         myAvatarBase64 = prefs.getString("avatar", "");
         updateMyStatusAvatar();
 
-        auth.signInAnonymously().addOnSuccessListener(res -> {
-            currentUser = res.getUser();
-            if (currentUser != null) {
-                callAdapter.setMyUid(currentUser.getUid());
-                saveProfileToPrefsAndFirestore();
-                listenChatPreviews();
-                listenUsers();
-                listenStatuses();
-                listenCallLogs();
-                listenGlobalIncomingCalls();
-            }
-        }).addOnFailureListener(e -> Toast.makeText(this, "Auth error: " + e.getMessage(), Toast.LENGTH_LONG).show());
+        if (auth.getCurrentUser() != null) {
+            startPrivateListeners();
+        } else {
+            auth.signInAnonymously().addOnSuccessListener(res -> startPrivateListeners())
+                    .addOnFailureListener(e -> Toast.makeText(this, "Auth error: " + e.getMessage(), Toast.LENGTH_LONG).show());
+        }
+    }
+
+    private void startPrivateListeners() {
+        saveProfileToPrefsAndFirestore();
+        listenPrivateContacts();
+        listenPrivateChats();
+        listenPrivateStatuses();
+        listenPrivateCallLogs();
+        listenPrivateIncomingCalls();
     }
 
     private void updateMyStatusAvatar() {
@@ -300,87 +301,174 @@ public class MainActivity extends AppCompatActivity {
         getSharedPreferences("DivineWA", MODE_PRIVATE).edit()
                 .putString("name", myName).putString("about", myAbout)
                 .putString("avatar", myAvatarBase64 != null ? myAvatarBase64 : "").apply();
-        if (currentUser == null) return;
+
         Map<String, Object> map = new HashMap<>();
-        map.put("uid", currentUser.getUid());
+        map.put("uid", myPhone);
+        map.put("phone", myPhone);
+        map.put("shortPhone", LoginActivity.getShortPhone(myPhone));
         map.put("name", myName);
         map.put("about", myAbout);
         map.put("avatarBase64", myAvatarBase64 != null ? myAvatarBase64 : "");
         map.put("online", true);
         map.put("lastSeen", System.currentTimeMillis());
-        db.collection("users").document(currentUser.getUid()).set(map, SetOptions.merge());
+        db.collection("users").document(myPhone).set(map, SetOptions.merge());
     }
 
-    private void listenChatPreviews() {
-        if (currentUser == null) return;
-        db.collection("chats").whereArrayContains("participants", currentUser.getUid())
+    /* 🔒 শুধুমাত্র আপনার সেভ করা কন্টাক্ট এবং চ্যাট লোড হবে */
+    private void listenPrivateContacts() {
+        db.collection("users").document(myPhone).collection("contacts")
                 .addSnapshotListener((snaps, err) -> {
                     if (snaps == null) return;
                     for (DocumentSnapshot d : snaps.getDocuments()) {
-                        String otherId = d.getId().replace(currentUser.getUid(), "").replace("_", "");
-                        String lm = d.getString("lastMessage");
-                        Long lt = d.getLong("lastTimestamp");
-                        if (lm != null) lastMsgMap.put(otherId, lm);
-                        if (lt != null) lastTimeMap.put(otherId, lt);
+                        attachPeerListener(d.getId());
                     }
-                    syncPreviewsIntoUsers();
                 });
     }
 
-    private void listenUsers() {
-        db.collection("users").addSnapshotListener((snaps, err) -> {
-            if (snaps == null || currentUser == null) return;
-            allUsers.clear();
-
-            UserModel global = new UserModel();
-            global.setUid("global_room");
-            global.setName("Global Community Chat");
-            global.setAbout("Tap to chat & call with everyone!");
-            global.setGlobalRoom(true);
-            allUsers.add(global);
-
-            for (DocumentSnapshot d : snaps.getDocuments()) {
-                UserModel u = d.toObject(UserModel.class);
-                if (u != null && !currentUser.getUid().equals(u.getUid())) {
-                    allUsers.add(u);
-                }
-            }
-            syncPreviewsIntoUsers();
-        });
+    @SuppressWarnings("unchecked")
+    private void listenPrivateChats() {
+        db.collection("chats").whereArrayContains("participants", myPhone)
+                .addSnapshotListener((snaps, err) -> {
+                    if (snaps == null) return;
+                    for (DocumentSnapshot d : snaps.getDocuments()) {
+                        List<String> parts = (List<String>) d.get("participants");
+                        if (parts == null) continue;
+                        String otherPhone = null;
+                        for (String p : parts) {
+                            if (!myPhone.equals(p)) { otherPhone = p; break; }
+                        }
+                        if (otherPhone != null) {
+                            String lm = d.getString("lastMessage");
+                            Long lt = d.getLong("lastTimestamp");
+                            if (lm != null) lastMsgMap.put(otherPhone, lm);
+                            if (lt != null) lastTimeMap.put(otherPhone, lt);
+                            attachPeerListener(otherPhone);
+                        }
+                    }
+                    applyFilters();
+                });
     }
 
-    private void syncPreviewsIntoUsers() {
-        for (UserModel u : allUsers) {
-            if (!u.isGlobalRoom() && u.getUid() != null) {
-                if (lastMsgMap.containsKey(u.getUid())) u.setLastMessage(lastMsgMap.get(u.getUid()));
-                if (lastTimeMap.containsKey(u.getUid())) u.setLastMsgTime(lastTimeMap.get(u.getUid()));
-            }
-        }
-        applyFilters();
+    private void attachPeerListener(String peerPhone) {
+        if (peerPhone == null || peerPhone.equals(myPhone) || peerListeners.containsKey(peerPhone)) return;
+        ListenerRegistration reg = db.collection("users").document(peerPhone)
+                .addSnapshotListener((snap, err) -> {
+                    if (snap != null && snap.exists()) {
+                        UserModel u = snap.toObject(UserModel.class);
+                        if (u != null) {
+                            u.setUid(peerPhone);
+                            peerUsersMap.put(peerPhone, u);
+                            applyFilters();
+                        }
+                    }
+                });
+        peerListeners.put(peerPhone, reg);
     }
 
     private void applyFilters() {
         filteredUsers.clear();
         String query = etSearch.getText().toString().toLowerCase().trim();
-        for (UserModel u : allUsers) {
-            boolean matchesQuery = query.isEmpty() || (u.getName() != null && u.getName().toLowerCase().contains(query));
-            boolean matchesChip = "all".equals(currentFilter)
-                    || ("online".equals(currentFilter) && u.isOnline())
-                    || ("groups".equals(currentFilter) && u.isGlobalRoom());
+        for (UserModel u : peerUsersMap.values()) {
+            if (lastMsgMap.containsKey(u.getUid())) u.setLastMessage(lastMsgMap.get(u.getUid()));
+            if (lastTimeMap.containsKey(u.getUid())) u.setLastMsgTime(lastTimeMap.get(u.getUid()));
+
+            boolean matchesQuery = query.isEmpty()
+                    || (u.getName() != null && u.getName().toLowerCase().contains(query))
+                    || (u.getUid() != null && u.getUid().contains(query));
+            boolean matchesChip = "all".equals(currentFilter) || ("online".equals(currentFilter) && u.isOnline());
+
             if (matchesQuery && matchesChip) filteredUsers.add(u);
         }
+        Collections.sort(filteredUsers, (a, b) -> Long.compare(b.getLastMsgTime(), a.getLastMsgTime()));
         userAdapter.notifyDataSetChanged();
     }
 
-    private void listenStatuses() {
-        db.collection("statuses").orderBy("timestamp", Query.Direction.DESCENDING).limit(40)
+    /* 🔍 মোবাইল নম্বর দিয়ে প্রাইভেট ইউজার খোঁজা */
+    private void showFindUserByPhoneDialog() {
+        EditText etPhone = new EditText(this);
+        etPhone.setHint("Enter friend's mobile number");
+        etPhone.setInputType(InputType.TYPE_CLASS_PHONE);
+        etPhone.setPadding(40, 28, 40, 20);
+
+        new AlertDialog.Builder(this)
+                .setTitle("Find Friend by Number")
+                .setMessage("যে নম্বর দিয়ে অ্যাকাউন্ট খোলা আছে সেটি লিখুন:")
+                .setView(etPhone)
+                .setPositiveButton("Search & Chat", (d, w) -> {
+                    String entered = LoginActivity.normalizePhone(etPhone.getText().toString());
+                    if (entered.length() < 7) {
+                        Toast.makeText(this, "সঠিক নম্বর লিখুন", Toast.LENGTH_SHORT).show();
+                        return;
+                    }
+                    if (entered.equals(myPhone)) {
+                        Toast.makeText(this, "এটি আপনার নিজের নম্বর!", Toast.LENGTH_SHORT).show();
+                        return;
+                    }
+                    searchUserInFirestore(entered);
+                })
+                .setNegativeButton("Cancel", null)
+                .show();
+    }
+
+    private void searchUserInFirestore(String cleanPhone) {
+        Toast.makeText(this, "Searching...", Toast.LENGTH_SHORT).show();
+        db.collection("users").document(cleanPhone).get().addOnSuccessListener(doc -> {
+            if (doc.exists()) {
+                onFriendFound(doc);
+            } else {
+                String shortCode = LoginActivity.getShortPhone(cleanPhone);
+                db.collection("users").whereEqualTo("shortPhone", shortCode).limit(1).get()
+                        .addOnSuccessListener(snaps -> {
+                            if (!snaps.isEmpty()) {
+                                DocumentSnapshot found = snaps.getDocuments().get(0);
+                                if (myPhone.equals(found.getId())) {
+                                    Toast.makeText(this, "এটি আপনার নিজের নম্বর!", Toast.LENGTH_SHORT).show();
+                                } else {
+                                    onFriendFound(found);
+                                }
+                            } else {
+                                Toast.makeText(this, "এই নম্বরে কোনো WhatsApp অ্যাকাউন্ট পাওয়া যায়নি", Toast.LENGTH_LONG).show();
+                            }
+                        });
+            }
+        });
+    }
+
+    private void onFriendFound(DocumentSnapshot doc) {
+        String friendPhone = doc.getId();
+        String friendName = doc.getString("name");
+        String friendAvatar = doc.getString("avatarBase64");
+
+        Map<String, Object> contact = new HashMap<>();
+        contact.put("phone", friendPhone);
+        contact.put("addedAt", System.currentTimeMillis());
+        db.collection("users").document(myPhone).collection("contacts").document(friendPhone).set(contact);
+
+        attachPeerListener(friendPhone);
+        openPrivateChat(friendPhone, friendName, friendAvatar);
+    }
+
+    private void openPrivateChat(String peerPhone, String peerName, String peerAvatar) {
+        Intent i = new Intent(MainActivity.this, ChatActivity.class);
+        i.putExtra("isGlobal", false);
+        i.putExtra("peerUid", peerPhone);
+        i.putExtra("peerName", peerName);
+        i.putExtra("peerAvatar", peerAvatar);
+        startActivity(i);
+    }
+
+    private void listenPrivateStatuses() {
+        db.collection("statuses").orderBy("timestamp", Query.Direction.DESCENDING).limit(60)
                 .addSnapshotListener((snaps, err) -> {
                     if (snaps == null) return;
                     statusList.clear();
                     long cutoff = System.currentTimeMillis() - (24 * 60 * 60 * 1000L);
+                    Set<String> allowed = new HashSet<>(peerUsersMap.keySet());
+                    allowed.add(myPhone);
+
                     for (DocumentSnapshot d : snaps.getDocuments()) {
                         StatusModel s = d.toObject(StatusModel.class);
-                        if (s != null && s.getTimestamp() >= cutoff) {
+                        if (s != null && s.getTimestamp() >= cutoff && allowed.contains(s.getUid())) {
                             s.setId(d.getId());
                             statusList.add(s);
                         }
@@ -389,38 +477,34 @@ public class MainActivity extends AppCompatActivity {
                 });
     }
 
-    private void listenCallLogs() {
-        db.collection("call_logs").orderBy("timestamp", Query.Direction.DESCENDING).limit(40)
+    private void listenPrivateCallLogs() {
+        db.collection("call_logs").whereArrayContains("participants", myPhone)
                 .addSnapshotListener((snaps, err) -> {
-                    if (snaps == null || currentUser == null) return;
+                    if (snaps == null) return;
                     callList.clear();
-                    String uid = currentUser.getUid();
                     for (DocumentSnapshot d : snaps.getDocuments()) {
                         CallLogModel c = d.toObject(CallLogModel.class);
-                        if (c != null && (uid.equals(c.getCallerId()) || uid.equals(c.getReceiverId()) || "global_room".equals(c.getReceiverId()))) {
-                            callList.add(c);
-                        }
+                        if (c != null) callList.add(c);
                     }
+                    Collections.sort(callList, (a, b) -> Long.compare(b.getTimestamp(), a.getTimestamp()));
                     callAdapter.notifyDataSetChanged();
                 });
     }
 
-    private void listenGlobalIncomingCalls() {
-        db.collection("calls").whereEqualTo("status", "calling")
+    private void listenPrivateIncomingCalls() {
+        db.collection("calls").whereEqualTo("receiverId", myPhone)
                 .addSnapshotListener((snaps, err) -> {
-                    if (snaps == null || currentUser == null || ChatActivity.isChatOpen) {
+                    if (snaps == null || ChatActivity.isChatOpen) {
                         stopRingtone();
                         incomingOverlay.setVisibility(View.GONE);
                         return;
                     }
-                    String uid = currentUser.getUid();
                     DocumentSnapshot foundCall = null;
                     for (DocumentSnapshot d : snaps.getDocuments()) {
-                        String callerId = d.getString("callerId");
-                        String receiverId = d.getString("receiverId");
+                        String status = d.getString("status");
                         Long createdAt = d.getLong("createdAt");
                         boolean isFresh = createdAt == null || (System.currentTimeMillis() - createdAt) < 60000;
-                        if (isFresh && !uid.equals(callerId) && (uid.equals(receiverId) || "live_channel".equals(d.getId()))) {
+                        if ("calling".equals(status) && isFresh) {
                             foundCall = d;
                             break;
                         }
@@ -430,7 +514,7 @@ public class MainActivity extends AppCompatActivity {
                         incomingOverlay.setVisibility(View.VISIBLE);
                         String cname = callDoc.getString("callerName");
                         String ctype = callDoc.getString("type");
-                        tvCallerName.setText(cname != null ? cname : "Friend");
+                        tvCallerName.setText(cname != null ? cname : callDoc.getString("callerId"));
                         tvCallType.setText("video".equals(ctype) ? "WhatsApp video call" : "WhatsApp voice call");
                         playRingtone();
 
@@ -443,7 +527,7 @@ public class MainActivity extends AppCompatActivity {
                             stopRingtone();
                             incomingOverlay.setVisibility(View.GONE);
                             Intent i = new Intent(MainActivity.this, ChatActivity.class);
-                            i.putExtra("isGlobal", "live_channel".equals(callDoc.getId()));
+                            i.putExtra("isGlobal", false);
                             i.putExtra("peerUid", callDoc.getString("callerId"));
                             i.putExtra("peerName", cname);
                             i.putExtra("autoAcceptCallId", callDoc.getId());
@@ -456,19 +540,33 @@ public class MainActivity extends AppCompatActivity {
                 });
     }
 
+    private void showMainMenuDialog() {
+        String[] items = {
+                "➕ Add Contact by Number",
+                "⚙️ Profile Settings (" + myPhone + ")",
+                "🚪 Logout / Switch Number"
+        };
+        new AlertDialog.Builder(this).setItems(items, (d, which) -> {
+            if (which == 0) showFindUserByPhoneDialog();
+            else if (which == 1) showProfileSettingsDialog();
+            else {
+                db.collection("users").document(myPhone).update("online", false, "lastSeen", System.currentTimeMillis());
+                getSharedPreferences("DivineWA", MODE_PRIVATE).edit().clear().apply();
+                startActivity(new Intent(this, LoginActivity.class));
+                finish();
+            }
+        }).show();
+    }
+
     private void playRingtone() {
         try {
-            if (ringtone == null) {
-                ringtone = RingtoneManager.getRingtone(this, RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE));
-            }
+            if (ringtone == null) ringtone = RingtoneManager.getRingtone(this, RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE));
             if (ringtone != null && !ringtone.isPlaying()) ringtone.play();
         } catch (Exception ignored) {}
     }
 
     private void stopRingtone() {
-        try {
-            if (ringtone != null && ringtone.isPlaying()) ringtone.stop();
-        } catch (Exception ignored) {}
+        try { if (ringtone != null && ringtone.isPlaying()) ringtone.stop(); } catch (Exception ignored) {}
     }
 
     private void openFullscreenStory(StatusModel s) {
@@ -491,8 +589,7 @@ public class MainActivity extends AppCompatActivity {
         final long start = System.currentTimeMillis();
         storyProgress.setProgress(0);
         storyRunnable = new Runnable() {
-            @Override
-            public void run() {
+            @Override public void run() {
                 long elapsed = System.currentTimeMillis() - start;
                 int pct = (int) Math.min(100, (elapsed * 100) / 5000);
                 storyProgress.setProgress(pct);
@@ -528,7 +625,7 @@ public class MainActivity extends AppCompatActivity {
         EditText etAbout = new EditText(this); etAbout.setHint("About / Bio"); etAbout.setText(myAbout);
         layout.addView(etName); layout.addView(etAbout);
 
-        new AlertDialog.Builder(this).setTitle("Profile Settings").setView(layout)
+        new AlertDialog.Builder(this).setTitle("Profile (" + myPhone + ")").setView(layout)
                 .setPositiveButton("Save", (d, w) -> {
                     String n = etName.getText().toString().trim(), a = etAbout.getText().toString().trim();
                     if (!n.isEmpty()) myName = n;
@@ -559,9 +656,8 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void postStatusToFirestore(String text, String imageBase64) {
-        if (currentUser == null) return;
         Map<String, Object> map = new HashMap<>();
-        map.put("uid", currentUser.getUid());
+        map.put("uid", myPhone);
         map.put("userName", myName);
         map.put("text", text);
         map.put("imageBase64", imageBase64);
@@ -583,23 +679,25 @@ public class MainActivity extends AppCompatActivity {
         } catch (Exception e) { return null; }
     }
 
-    @Override
-    protected void onResume() {
+    @Override protected void onResume() {
         super.onResume();
-        if (currentUser != null) db.collection("users").document(currentUser.getUid()).update("online", true, "lastSeen", System.currentTimeMillis());
+        if (myPhone != null && !myPhone.isEmpty()) {
+            db.collection("users").document(myPhone).update("online", true, "lastSeen", System.currentTimeMillis());
+        }
     }
 
-    @Override
-    protected void onPause() {
+    @Override protected void onPause() {
         super.onPause();
         stopRingtone();
-        if (currentUser != null) db.collection("users").document(currentUser.getUid()).update("online", false, "lastSeen", System.currentTimeMillis());
+        if (myPhone != null && !myPhone.isEmpty()) {
+            db.collection("users").document(myPhone).update("online", false, "lastSeen", System.currentTimeMillis());
+        }
     }
 
-    @Override
-    protected void onDestroy() {
+    @Override protected void onDestroy() {
         super.onDestroy();
         stopRingtone();
         if (storyRunnable != null) storyHandler.removeCallbacks(storyRunnable);
+        for (ListenerRegistration r : peerListeners.values()) r.remove();
     }
 }
