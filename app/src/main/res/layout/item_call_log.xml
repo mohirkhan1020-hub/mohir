@@ -1,1 +1,47 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="70dp"
+    android:gravity="center_vertical"
+    android:orientation="horizontal"
+    android:paddingHorizontal="16dp">
 
+    <TextView
+        android:layout_width="46dp"
+        android:layout_height="46dp"
+        android:background="@drawable/bg_wa_circle_gray"
+        android:gravity="center"
+        android:text="👤"
+        android:textSize="18sp" />
+
+    <LinearLayout
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="14dp"
+        android:layout_weight="1"
+        android:orientation="vertical">
+
+        <TextView
+            android:id="@+id/tvCallPeer"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:textColor="#E9EDEF"
+            android:textSize="16sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/tvCallInfo"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:textColor="#8696A0"
+            android:textSize="13sp" />
+    </LinearLayout>
+
+    <TextView
+        android:id="@+id/tvCallIcon"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="📞"
+        android:textColor="#00A884"
+        android:textSize="20sp" />
+</LinearLayout>
