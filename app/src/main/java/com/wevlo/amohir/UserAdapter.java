@@ -2,6 +2,7 @@ package com.wevlo.amohir;
 
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
+import android.graphics.Color;
 import android.util.Base64;
 import android.view.LayoutInflater;
 import android.view.View;
@@ -34,15 +35,18 @@ public class UserAdapter extends RecyclerView.Adapter<UserAdapter.VH> {
     @NonNull
     @Override
     public VH onCreateViewHolder(@NonNull ViewGroup parent, int viewType) {
-        View v = LayoutInflater.from(parent.getContext()).inflate(R.layout.item_user_chat, parent, false);
-        return new VH(v);
+        return new VH(LayoutInflater.from(parent.getContext()).inflate(R.layout.item_user_chat, parent, false));
     }
 
     @Override
     public void onBindViewHolder(@NonNull VH h, int position) {
         UserModel u = users.get(position);
         h.tvName.setText(u.getName() != null ? u.getName() : "User");
-        h.tvAbout.setText(u.getAbout() != null ? u.getAbout() : "Hey there! I am using WhatsApp.");
+
+        String subtitle = (u.getLastMessage() != null && !u.getLastMessage().isEmpty())
+                ? u.getLastMessage()
+                : (u.getAbout() != null ? u.getAbout() : "Hey there! I am using WhatsApp.");
+        h.tvAbout.setText(subtitle);
 
         if (u.isGlobalRoom()) {
             h.tvAvatar.setText("🌍");
@@ -50,6 +54,7 @@ public class UserAdapter extends RecyclerView.Adapter<UserAdapter.VH> {
             h.ivAvatar.setVisibility(View.GONE);
             h.viewOnline.setVisibility(View.VISIBLE);
             h.tvStatusTime.setText("GROUP");
+            h.tvStatusTime.setTextColor(Color.parseColor("#25D366"));
         } else {
             if (u.getAvatarBase64() != null && !u.getAvatarBase64().isEmpty()) {
                 Bitmap bmp = decodeBase64(u.getAvatarBase64());
@@ -64,16 +69,21 @@ public class UserAdapter extends RecyclerView.Adapter<UserAdapter.VH> {
                 String n = u.getName();
                 h.tvAvatar.setText((n != null && !n.isEmpty()) ? n.substring(0, 1).toUpperCase() : "👤");
             }
+
             h.viewOnline.setVisibility(u.isOnline() ? View.VISIBLE : View.GONE);
-            if (u.isOnline()) {
+            if (u.getLastMsgTime() > 0) {
+                h.tvStatusTime.setText(new SimpleDateFormat("hh:mm a", Locale.getDefault()).format(new Date(u.getLastMsgTime())));
+                h.tvStatusTime.setTextColor(Color.parseColor("#8696A0"));
+            } else if (u.isOnline()) {
                 h.tvStatusTime.setText("online");
+                h.tvStatusTime.setTextColor(Color.parseColor("#25D366"));
             } else if (u.getLastSeen() > 0) {
                 h.tvStatusTime.setText(new SimpleDateFormat("hh:mm a", Locale.getDefault()).format(new Date(u.getLastSeen())));
+                h.tvStatusTime.setTextColor(Color.parseColor("#8696A0"));
             } else {
                 h.tvStatusTime.setText("");
             }
         }
-
         h.itemView.setOnClickListener(v -> listener.onUserClick(u));
     }
 
@@ -92,14 +102,14 @@ public class UserAdapter extends RecyclerView.Adapter<UserAdapter.VH> {
         TextView tvAvatar, tvName, tvAbout, tvStatusTime;
         ImageView ivAvatar;
         View viewOnline;
-        VH(@NonNull View itemView) {
-            super(itemView);
-            tvAvatar = itemView.findViewById(R.id.tvAvatar);
-            ivAvatar = itemView.findViewById(R.id.ivAvatar);
-            viewOnline = itemView.findViewById(R.id.viewOnline);
-            tvName = itemView.findViewById(R.id.tvName);
-            tvAbout = itemView.findViewById(R.id.tvAbout);
-            tvStatusTime = itemView.findViewById(R.id.tvStatusTime);
+        VH(@NonNull View v) {
+            super(v);
+            tvAvatar = v.findViewById(R.id.tvAvatar);
+            ivAvatar = v.findViewById(R.id.ivAvatar);
+            viewOnline = v.findViewById(R.id.viewOnline);
+            tvName = v.findViewById(R.id.tvName);
+            tvAbout = v.findViewById(R.id.tvAbout);
+            tvStatusTime = v.findViewById(R.id.tvStatusTime);
         }
     }
 }
