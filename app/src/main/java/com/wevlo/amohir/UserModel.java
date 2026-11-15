@@ -1,15 +1,9 @@
-
 package com.wevlo.amohir;
 
 public class UserModel {
-    private String uid;
-    private String name;
-    private String about;
-    private String avatarBase64;
-    private boolean online;
-    private long lastSeen;
-    private String typingTo;
-    private boolean globalRoom;
+    private String uid, name, about, avatarBase64, typingTo, lastMessage;
+    private boolean online, globalRoom;
+    private long lastSeen, lastMsgTime;
 
     public UserModel() {}
 
@@ -36,4 +30,10 @@ public class UserModel {
 
     public boolean isGlobalRoom() { return globalRoom; }
     public void setGlobalRoom(boolean globalRoom) { this.globalRoom = globalRoom; }
+
+    public String getLastMessage() { return lastMessage; }
+    public void setLastMessage(String lastMessage) { this.lastMessage = lastMessage; }
+
+    public long getLastMsgTime() { return lastMsgTime; }
+    public void setLastMsgTime(long lastMsgTime) { this.lastMsgTime = lastMsgTime; }
 }
