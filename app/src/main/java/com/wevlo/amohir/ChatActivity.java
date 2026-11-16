@@ -2,19 +2,23 @@ package com.wevlo.amohir;
 
 import android.Manifest;
 import android.annotation.SuppressLint;
+import android.app.Activity;
 import android.app.AlertDialog;
 import android.app.NotificationManager;
 import android.content.ClipData;
 import android.content.ClipboardManager;
 import android.content.Context;
+import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
+import android.graphics.Color;
 import android.graphics.Outline;
 import android.media.AudioManager;
 import android.media.MediaRecorder;
 import android.media.Ringtone;
 import android.media.RingtoneManager;
+import android.media.projection.MediaProjectionManager;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
@@ -95,7 +99,7 @@ public class ChatActivity extends AppCompatActivity {
     private ImageView ivChatAvatar;
     private View viewChatOnline;
     private EditText etMessage;
-    private ImageButton btnSendOrMic, btnMaximize, btnMic, btnCam, btnSpeaker;
+    private ImageButton btnSendOrMic, btnMaximize, btnMic, btnCam, btnSpeaker, btnScreenShare;
     private LinearLayout replyPreviewLayout, recordingBar, inputRowLayout, callTopBar, callBottomBar, audioCallAvatarBox;
     private FrameLayout incomingOverlay, callOverlay;
     private RecyclerView rvMessages;
@@ -118,7 +122,7 @@ public class ChatActivity extends AppCompatActivity {
     private String activeCallType = "video";
     private boolean isMuted = false, isCamOff = false, isSpeakerOn = true;
     private boolean hasRemoteSdp = false, isCallerCurrent = false, isAutoAccepting = false;
-    private long callStartTime = 0;
+    private long callStartTime = 0, lastScreenReqTime = 0;
     private final Handler timerHandler = new Handler(Looper.getMainLooper());
     private Runnable timerRunnable, callTimeoutRunnable;
 
@@ -137,6 +141,23 @@ public class ChatActivity extends AppCompatActivity {
                 } else if (pendingPermissionAction != null) {
                     pendingPermissionAction = null;
                     Toast.makeText(this, "কলের জন্য ক্যামেরা ও মাইক পারমিশন আবশ্যক", Toast.LENGTH_SHORT).show();
+                }
+            });
+
+    private final ActivityResultLauncher<Intent> screenShareLauncher =
+            registerForActivityResult(new ActivityResultContracts.StartActivityForResult(), result -> {
+                if (result.getResultCode() == Activity.RESULT_OK && result.getData() != null) {
+                    Intent projectionData = result.getData();
+                    ScreenShareService.onServiceReady = () -> runOnUiThread(() -> {
+                        if (webRTCManager != null) {
+                            webRTCManager.startScreenShare(projectionData, localVideoView);
+                            btnScreenShare.setColorFilter(Color.parseColor("#25D366"));
+                            Toast.makeText(this, "Screen sharing started", Toast.LENGTH_SHORT).show();
+                        }
+                    });
+                    ContextCompat.startForegroundService(this, new Intent(this, ScreenShareService.class));
+                } else {
+                    Toast.makeText(this, "Screen share cancelled", Toast.LENGTH_SHORT).show();
                 }
             });
 
@@ -234,6 +255,7 @@ public class ChatActivity extends AppCompatActivity {
         btnMic = findViewById(R.id.btnMic);
         btnCam = findViewById(R.id.btnCam);
         btnSpeaker = findViewById(R.id.btnSpeaker);
+        btnScreenShare = findViewById(R.id.btnScreenShare);
 
         tvChatName.setText(peerName != null ? peerName : peerUid);
         String peerAvatar = getIntent().getStringExtra("peerAvatar");
@@ -302,6 +324,8 @@ public class ChatActivity extends AppCompatActivity {
         findViewById(R.id.btnMinimize).setOnClickListener(v -> minimizeCallUI(true));
         btnMaximize.setOnClickListener(v -> minimizeCallUI(false));
 
+        btnScreenShare.setOnClickListener(v -> onScreenShareButtonClick());
+
         btnMic.setOnClickListener(v -> {
             isMuted = !isMuted;
             if (webRTCManager != null) webRTCManager.setMicEnabled(!isMuted);
@@ -319,6 +343,52 @@ public class ChatActivity extends AppCompatActivity {
             if (audioManager != null) audioManager.setSpeakerphoneOn(isSpeakerOn);
             btnSpeaker.setAlpha(isSpeakerOn ? 1.0f : 0.45f);
         });
+    }
+
+    private void onScreenShareButtonClick() {
+        if (!"video".equals(activeCallType)) {
+            Toast.makeText(this, "স্ক্রিন শেয়ার করার জন্য Video Call দিন", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        if (webRTCManager.isScreenSharing()) {
+            webRTCManager.stopScreenShare(localVideoView);
+            stopService(new Intent(this, ScreenShareService.class));
+            btnScreenShare.clearColorFilter();
+            Toast.makeText(this, "Screen sharing stopped", Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        String[] opts = {"📱 Share My Screen (আমার স্ক্রিন দেখাও)", "📲 Request Friend's Screen (অন্য ফোনের স্ক্রিন দেখো)"};
+        new AlertDialog.Builder(this)
+                .setTitle("Screen Share")
+                .setItems(opts, (d, which) -> {
+                    if (which == 0) {
+                        launchMyScreenSharePrompt();
+                    } else {
+                        Map<String, Object> req = new HashMap<>();
+                        req.put("screenRequestTarget", peerUid);
+                        req.put("screenRequestTime", System.currentTimeMillis());
+                        db.collection("calls").document(callDocId).set(req, SetOptions.merge());
+                        Toast.makeText(this, "অন্য ফোনে স্ক্রিন শেয়ার পপআপ পাঠানো হয়েছে!", Toast.LENGTH_SHORT).show();
+                    }
+                }).show();
+    }
+
+    private void launchMyScreenSharePrompt() {
+        MediaProjectionManager mpm = (MediaProjectionManager) getSystemService(Context.MEDIA_PROJECTION_SERVICE);
+        if (mpm != null) {
+            screenShareLauncher.launch(mpm.createScreenCaptureIntent());
+        }
+    }
+
+    private void handleRemoteScreenRequest(DocumentSnapshot snap) {
+        String target = snap.getString("screenRequestTarget");
+        Long reqTime = snap.getLong("screenRequestTime");
+        if (myUid.equals(target) && reqTime != null && reqTime > lastScreenReqTime
+                && callOverlay.getVisibility() == View.VISIBLE && !webRTCManager.isScreenSharing()) {
+            lastScreenReqTime = reqTime;
+            launchMyScreenSharePrompt();
+        }
     }
 
     private void triggerReply(MessageModel m) {
@@ -575,6 +645,12 @@ public class ChatActivity extends AppCompatActivity {
                     }
                 });
             }
+            @Override public void onScreenShareStopped() {
+                runOnUiThread(() -> {
+                    stopService(new Intent(ChatActivity.this, ScreenShareService.class));
+                    btnScreenShare.clearColorFilter();
+                });
+            }
             @Override public void onError(String message) {
                 runOnUiThread(() -> Toast.makeText(ChatActivity.this, message, Toast.LENGTH_SHORT).show());
             }
@@ -658,6 +734,7 @@ public class ChatActivity extends AppCompatActivity {
                     if (callListener != null) callListener.remove();
                     callListener = callDoc.addSnapshotListener((snap, err) -> {
                         if (snap == null || !snap.exists()) return;
+                        handleRemoteScreenRequest(snap);
                         String status = snap.getString("status");
                         if ("connected".equals(status) && !hasRemoteSdp) {
                             Map<String, Object> ans = (Map<String, Object>) snap.get("answer");
@@ -682,6 +759,7 @@ public class ChatActivity extends AppCompatActivity {
     private void listenIncomingCalls() {
         incomingListener = db.collection("calls").document(callDocId).addSnapshotListener((snap, err) -> {
             if (snap == null || !snap.exists()) return;
+            handleRemoteScreenRequest(snap);
             String status = snap.getString("status");
             String callerId = snap.getString("callerId");
             Long createdAt = snap.getLong("createdAt");
@@ -797,6 +875,7 @@ public class ChatActivity extends AppCompatActivity {
         isSpeakerOn = "video".equals(type); isMuted = false; isCamOff = false;
         btnMic.setImageResource(R.drawable.ic_mic); btnMic.setAlpha(1.0f);
         btnCam.setAlpha(1.0f); btnSpeaker.setAlpha(isSpeakerOn ? 1.0f : 0.45f);
+        btnScreenShare.clearColorFilter();
 
         minimizeCallUI(false);
         callOverlay.setVisibility(View.VISIBLE);
@@ -842,6 +921,8 @@ public class ChatActivity extends AppCompatActivity {
 
     private void hangupCall(boolean notifyFirebase) {
         stopRingtone(); cancelCallTimeout(); isAutoAccepting = false;
+        stopService(new Intent(this, ScreenShareService.class));
+        btnScreenShare.clearColorFilter();
         if (timerRunnable != null) { timerHandler.removeCallbacks(timerRunnable); timerRunnable = null; }
         if (callListener != null) { callListener.remove(); callListener = null; }
         if (candListener != null) { candListener.remove(); candListener = null; }
@@ -859,6 +940,7 @@ public class ChatActivity extends AppCompatActivity {
     protected void onDestroy() {
         super.onDestroy();
         stopRingtone(); cancelCallTimeout();
+        stopService(new Intent(this, ScreenShareService.class));
         if (callOverlay != null && callOverlay.getVisibility() == View.VISIBLE) hangupCall(true);
         db.collection("users").document(myUid).update("typingTo", "");
         if (msgListener != null) msgListener.remove();
