@@ -120,7 +120,7 @@ public class ChatActivity extends AppCompatActivity {
     private boolean hasRemoteSdp = false, isCallerCurrent = false, isAutoAccepting = false;
     private long callStartTime = 0;
     private final Handler timerHandler = new Handler(Looper.getMainLooper());
-    private Runnable timerRunnable;
+    private Runnable timerRunnable, callTimeoutRunnable;
 
     private ListenerRegistration msgListener, peerListener, callListener, incomingListener, candListener;
     private Uri cameraImageUri;
@@ -248,7 +248,6 @@ public class ChatActivity extends AppCompatActivity {
             tvChatAvatar.setText(peerName != null && !peerName.isEmpty() ? peerName.substring(0, 1).toUpperCase() : "👤");
         }
 
-        // প্রোফাইলে ক্লিক করলে একাউন্ট ডিটেইলস ওপেন হবে
         View.OnClickListener openProfileClick = v -> ContactInfoDialog.show(this, peerUid, tvChatName.getText().toString(),
                 new ContactInfoDialog.ActionCallback() {
                     @Override public void onAudioCall() { checkPermissionsAndStartCall("audio"); }
@@ -534,12 +533,12 @@ public class ChatActivity extends AppCompatActivity {
 
         remoteVideoView = findViewById(R.id.remoteVideoView);
         remoteVideoView.init(eglBase.getEglBaseContext(), null);
-        remoteVideoView.setScalingType(RendererCommon.ScalingType.SCALE_ASPECT_FILL);
+        remoteVideoView.setScalingType(RendererCommon.ScalingType.SCALE_ASPECT_BALANCED);
         remoteVideoView.setEnableHardwareScaler(true);
 
         localVideoView = findViewById(R.id.localVideoView);
         localVideoView.init(eglBase.getEglBaseContext(), null);
-        localVideoView.setScalingType(RendererCommon.ScalingType.SCALE_ASPECT_FILL);
+        localVideoView.setScalingType(RendererCommon.ScalingType.SCALE_ASPECT_BALANCED);
         localVideoView.setMirror(true);
         localVideoView.setZOrderMediaOverlay(true);
         localVideoView.setOutlineProvider(new ViewOutlineProvider() {
@@ -547,7 +546,6 @@ public class ChatActivity extends AppCompatActivity {
                 outline.setRoundRect(0, 0, view.getWidth(), view.getHeight(), dpToPx(16));
             }
         });
-        localVideoView.setClipToOutline(true);
 
         webRTCManager = new WebRTCManager(this, eglBase, new WebRTCManager.Callback() {
             @Override public void onIceCandidateGenerated(IceCandidate candidate) {
@@ -557,14 +555,24 @@ public class ChatActivity extends AppCompatActivity {
                 db.collection("calls").document(callDocId).collection(col).add(map);
             }
             @Override public void onRemoteStreamAdded(VideoTrack videoTrack) {
-                runOnUiThread(() -> videoTrack.addSink(remoteVideoView));
+                runOnUiThread(() -> {
+                    if ("video".equals(activeCallType)) setLocalVideoFullscreen(false);
+                    videoTrack.addSink(remoteVideoView);
+                });
             }
             @Override public void onConnectionStateChanged(PeerConnection.PeerConnectionState state) {
                 runOnUiThread(() -> {
-                    if (state == PeerConnection.PeerConnectionState.CONNECTING) tvCallTimer.setText("Connecting...");
-                    else if (state == PeerConnection.PeerConnectionState.CONNECTED) startCallTimer();
-                    else if (state == PeerConnection.PeerConnectionState.FAILED) tvCallTimer.setText("Connection Failed");
-                    else if (state == PeerConnection.PeerConnectionState.DISCONNECTED) tvCallTimer.setText("Reconnecting...");
+                    if (state == PeerConnection.PeerConnectionState.CONNECTING) {
+                        tvCallTimer.setText("Connecting...");
+                    } else if (state == PeerConnection.PeerConnectionState.CONNECTED) {
+                        cancelCallTimeout();
+                        if ("video".equals(activeCallType)) setLocalVideoFullscreen(false);
+                        startCallTimer();
+                    } else if (state == PeerConnection.PeerConnectionState.FAILED) {
+                        tvCallTimer.setText("Connection Failed");
+                    } else if (state == PeerConnection.PeerConnectionState.DISCONNECTED) {
+                        tvCallTimer.setText("Reconnecting...");
+                    }
                 });
             }
             @Override public void onError(String message) {
@@ -573,11 +581,32 @@ public class ChatActivity extends AppCompatActivity {
         });
     }
 
+    private void setLocalVideoFullscreen(boolean fullscreen) {
+        FrameLayout.LayoutParams params = (FrameLayout.LayoutParams) localVideoView.getLayoutParams();
+        localVideoView.setTranslationX(0f);
+        localVideoView.setTranslationY(0f);
+        if (fullscreen) {
+            params.width = ViewGroup.LayoutParams.MATCH_PARENT;
+            params.height = ViewGroup.LayoutParams.MATCH_PARENT;
+            params.gravity = Gravity.NO_GRAVITY;
+            params.setMargins(0, 0, 0, 0);
+            localVideoView.setClipToOutline(false);
+        } else {
+            params.width = dpToPx(112);
+            params.height = dpToPx(168);
+            params.gravity = Gravity.TOP | Gravity.END;
+            params.setMargins(0, dpToPx(92), dpToPx(16), 0);
+            localVideoView.setClipToOutline(true);
+        }
+        localVideoView.setLayoutParams(params);
+    }
+
     @SuppressLint("ClickableViewAccessibility")
     private void setupDraggableLocalView() {
         localVideoView.setOnTouchListener(new View.OnTouchListener() {
             float dX, dY;
             @Override public boolean onTouch(View view, MotionEvent event) {
+                if (view.getWidth() >= callOverlay.getWidth() - 20) return false;
                 if (event.getAction() == MotionEvent.ACTION_DOWN) { dX = view.getX() - event.getRawX(); dY = view.getY() - event.getRawY(); return true; }
                 if (event.getAction() == MotionEvent.ACTION_MOVE) { view.setX(event.getRawX() + dX); view.setY(event.getRawY() + dY); return true; }
                 return false;
@@ -600,7 +629,16 @@ public class ChatActivity extends AppCompatActivity {
     private void startCall(String type) {
         isCallerCurrent = true; activeCallType = type; hasRemoteSdp = false;
         logCallHistory(type);
-        setupCallUI(type, tvChatName.getText().toString());
+        setupCallUI(type, tvChatName.getText().toString(), true);
+
+        cancelCallTimeout();
+        callTimeoutRunnable = () -> {
+            if (callOverlay.getVisibility() == View.VISIBLE && timerRunnable == null) {
+                Toast.makeText(this, "No answer", Toast.LENGTH_SHORT).show();
+                hangupCall(true);
+            }
+        };
+        timerHandler.postDelayed(callTimeoutRunnable, 45000);
 
         clearOldCandidates(() -> {
             webRTCManager.startLocalMedia("video".equals(type), localVideoView);
@@ -637,13 +675,17 @@ public class ChatActivity extends AppCompatActivity {
         });
     }
 
+    private void cancelCallTimeout() {
+        if (callTimeoutRunnable != null) { timerHandler.removeCallbacks(callTimeoutRunnable); callTimeoutRunnable = null; }
+    }
+
     private void listenIncomingCalls() {
         incomingListener = db.collection("calls").document(callDocId).addSnapshotListener((snap, err) -> {
             if (snap == null || !snap.exists()) return;
             String status = snap.getString("status");
             String callerId = snap.getString("callerId");
             Long createdAt = snap.getLong("createdAt");
-            boolean isFresh = createdAt == null || (System.currentTimeMillis() - createdAt) < 60000;
+            boolean isFresh = createdAt == null || Math.abs(System.currentTimeMillis() - createdAt) < 180000;
 
             if ("calling".equals(status) && isFresh && !myUid.equals(callerId)
                     && callOverlay.getVisibility() != View.VISIBLE && !isAutoAccepting) {
@@ -684,7 +726,7 @@ public class ChatActivity extends AppCompatActivity {
         activeCallType = snap.getString("type");
         if (activeCallType == null) activeCallType = "video";
 
-        setupCallUI(activeCallType, snap.getString("callerName"));
+        setupCallUI(activeCallType, snap.getString("callerName"), false);
         webRTCManager.startLocalMedia("video".equals(activeCallType), localVideoView);
         webRTCManager.createPeerConnection();
 
@@ -749,7 +791,7 @@ public class ChatActivity extends AppCompatActivity {
 
     private void stopRingtone() { try { if (ringtone != null && ringtone.isPlaying()) ringtone.stop(); } catch (Exception ignored) {} }
 
-    private void setupCallUI(String type, String targetName) {
+    private void setupCallUI(String type, String targetName, boolean isOutgoing) {
         audioManager.setMode(AudioManager.MODE_IN_COMMUNICATION);
         audioManager.setSpeakerphoneOn("video".equals(type));
         isSpeakerOn = "video".equals(type); isMuted = false; isCamOff = false;
@@ -759,12 +801,13 @@ public class ChatActivity extends AppCompatActivity {
         minimizeCallUI(false);
         callOverlay.setVisibility(View.VISIBLE);
         tvActiveTarget.setText(targetName != null ? targetName : "Friend");
-        tvCallTimer.setText("Calling...");
+        tvCallTimer.setText(isOutgoing ? "Calling..." : "Connecting...");
 
         boolean isVid = "video".equals(type);
         localVideoView.setVisibility(isVid ? View.VISIBLE : View.GONE);
         remoteVideoView.setVisibility(isVid ? View.VISIBLE : View.GONE);
         audioCallAvatarBox.setVisibility(isVid ? View.GONE : View.VISIBLE);
+        if (isVid) setLocalVideoFullscreen(isOutgoing);
     }
 
     private void minimizeCallUI(boolean minimize) {
@@ -798,7 +841,7 @@ public class ChatActivity extends AppCompatActivity {
     }
 
     private void hangupCall(boolean notifyFirebase) {
-        stopRingtone(); isAutoAccepting = false;
+        stopRingtone(); cancelCallTimeout(); isAutoAccepting = false;
         if (timerRunnable != null) { timerHandler.removeCallbacks(timerRunnable); timerRunnable = null; }
         if (callListener != null) { callListener.remove(); callListener = null; }
         if (candListener != null) { candListener.remove(); candListener = null; }
@@ -815,7 +858,7 @@ public class ChatActivity extends AppCompatActivity {
     @Override
     protected void onDestroy() {
         super.onDestroy();
-        stopRingtone();
+        stopRingtone(); cancelCallTimeout();
         if (callOverlay != null && callOverlay.getVisibility() == View.VISIBLE) hangupCall(true);
         db.collection("users").document(myUid).update("typingTo", "");
         if (msgListener != null) msgListener.remove();
