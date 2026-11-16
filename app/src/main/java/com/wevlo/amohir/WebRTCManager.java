@@ -128,9 +128,9 @@ public class WebRTCManager {
             videoSource = factory.createVideoSource(false);
             videoCapturer.initialize(surfaceTextureHelper, context, videoSource.getCapturerObserver());
             try {
-                videoCapturer.startCapture(1280, 720, 30);
+                videoCapturer.startCapture(960, 540, 24);
             } catch (Exception e) {
-                try { videoCapturer.startCapture(640, 480, 30); } catch (Exception ignored) {}
+                try { videoCapturer.startCapture(640, 480, 24); } catch (Exception ignored) {}
             }
             if (localView != null) localView.setMirror(true);
             localVideoTrack = factory.createVideoTrack("ARDAMSv0", videoSource);
@@ -163,16 +163,15 @@ public class WebRTCManager {
         List<PeerConnection.IceServer> iceServers = new ArrayList<>();
         iceServers.add(PeerConnection.IceServer.builder("stun:stun.l.google.com:19302").createIceServer());
         iceServers.add(PeerConnection.IceServer.builder("stun:stun1.l.google.com:19302").createIceServer());
-        iceServers.add(PeerConnection.IceServer.builder("stun:stun.relay.metered.ca:80").createIceServer());
-        iceServers.add(PeerConnection.IceServer.builder("turn:standard.relay.metered.ca:80").setUsername(TURN_USERNAME).setPassword(TURN_PASSWORD).createIceServer());
-        iceServers.add(PeerConnection.IceServer.builder("turn:standard.relay.metered.ca:80?transport=tcp").setUsername(TURN_USERNAME).setPassword(TURN_PASSWORD).createIceServer());
-        iceServers.add(PeerConnection.IceServer.builder("turn:standard.relay.metered.ca:443").setUsername(TURN_USERNAME).setPassword(TURN_PASSWORD).createIceServer());
-        iceServers.add(PeerConnection.IceServer.builder("turns:standard.relay.metered.ca:443?transport=tcp").setUsername(TURN_USERNAME).setPassword(TURN_PASSWORD).createIceServer());
         iceServers.add(PeerConnection.IceServer.builder("turn:global.relay.metered.ca:80").setUsername(TURN_USERNAME).setPassword(TURN_PASSWORD).createIceServer());
-        iceServers.add(PeerConnection.IceServer.builder("turn:global.relay.metered.ca:443").setUsername(TURN_USERNAME).setPassword(TURN_PASSWORD).createIceServer());
+        iceServers.add(PeerConnection.IceServer.builder("turn:global.relay.metered.ca:443?transport=tcp").setUsername(TURN_USERNAME).setPassword(TURN_PASSWORD).createIceServer());
+        iceServers.add(PeerConnection.IceServer.builder("turn:standard.relay.metered.ca:80").setUsername(TURN_USERNAME).setPassword(TURN_PASSWORD).createIceServer());
+        iceServers.add(PeerConnection.IceServer.builder("turns:standard.relay.metered.ca:443?transport=tcp").setUsername(TURN_USERNAME).setPassword(TURN_PASSWORD).createIceServer());
 
         PeerConnection.RTCConfiguration rtcConfig = new PeerConnection.RTCConfiguration(iceServers);
         rtcConfig.sdpSemantics = PeerConnection.SdpSemantics.UNIFIED_PLAN;
+        rtcConfig.bundlePolicy = PeerConnection.BundlePolicy.MAXBUNDLE;
+        rtcConfig.rtcpMuxPolicy = PeerConnection.RtcpMuxPolicy.REQUIRE;
         rtcConfig.continualGatheringPolicy = PeerConnection.ContinualGatheringPolicy.GATHER_CONTINUALLY;
 
         peerConnection = factory.createPeerConnection(rtcConfig, new PeerConnection.Observer() {
@@ -205,24 +204,25 @@ public class WebRTCManager {
             if (localAudioTrack != null) peerConnection.addTrack(localAudioTrack, streamIds);
             if (localVideoTrack != null) {
                 videoSender = peerConnection.addTrack(localVideoTrack, streamIds);
-                applyHighQualityVideoParams();
+                applySmoothVideoParams(false);
             }
         }
     }
 
-    private void applyHighQualityVideoParams() {
+    private void applySmoothVideoParams(boolean screenMode) {
         if (videoSender == null) return;
         RtpParameters params = videoSender.getParameters();
         for (RtpParameters.Encoding enc : params.encodings) {
-            enc.maxBitrateBps = 2_000_000;
-            enc.minBitrateBps = 500_000;
-            enc.maxFramerate = 30;
+            enc.maxBitrateBps = screenMode ? 1_500_000 : 1_100_000;
+            enc.minBitrateBps = 80_000;
+            enc.maxFramerate = screenMode ? 15 : 24;
         }
-        params.degradationPreference = RtpParameters.DegradationPreference.MAINTAIN_RESOLUTION;
+        params.degradationPreference = screenMode
+                ? RtpParameters.DegradationPreference.MAINTAIN_RESOLUTION
+                : RtpParameters.DegradationPreference.MAINTAIN_FRAMERATE;
         videoSender.setParameters(params);
     }
 
-    /* 🖥️ Screen Share শুরু ও বন্ধ */
     public boolean isScreenSharing() { return isScreenSharing; }
 
     public void startScreenShare(Intent projectionData, SurfaceViewRenderer localView) {
@@ -253,7 +253,7 @@ public class WebRTCManager {
             screenVideoTrack.addSink(localView);
         }
         videoSender.setTrack(screenVideoTrack, false);
-        applyHighQualityVideoParams();
+        applySmoothVideoParams(true);
     }
 
     public void stopScreenShare(SurfaceViewRenderer localView) {
@@ -264,7 +264,7 @@ public class WebRTCManager {
         startCameraInternal(localView);
         if (videoSender != null && localVideoTrack != null) {
             videoSender.setTrack(localVideoTrack, false);
-            applyHighQualityVideoParams();
+            applySmoothVideoParams(false);
         }
     }
 
