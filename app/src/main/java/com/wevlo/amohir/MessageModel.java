@@ -3,8 +3,10 @@ package com.wevlo.amohir;
 public class MessageModel {
     private String id, text, type, mediaUrl, senderId, senderName;
     private String replyToSender, replyToText, reaction, voiceDuration, fileName, latLng;
-    private long timestamp;
+    private long timestamp, expireAt;
     private boolean seen, edited, deleted, forwarded;
+    private boolean viewOnce, opened;
+    private boolean starred;
 
     public MessageModel() {}
 
@@ -28,6 +30,9 @@ public class MessageModel {
 
     public long getTimestamp() { return timestamp; }
     public void setTimestamp(long timestamp) { this.timestamp = timestamp; }
+
+    public long getExpireAt() { return expireAt; }
+    public void setExpireAt(long expireAt) { this.expireAt = expireAt; }
 
     public boolean isSeen() { return seen; }
     public void setSeen(boolean seen) { this.seen = seen; }
@@ -58,4 +63,13 @@ public class MessageModel {
 
     public boolean isForwarded() { return forwarded; }
     public void setForwarded(boolean forwarded) { this.forwarded = forwarded; }
+
+    public boolean isViewOnce() { return viewOnce; }
+    public void setViewOnce(boolean viewOnce) { this.viewOnce = viewOnce; }
+
+    public boolean isOpened() { return opened; }
+    public void setOpened(boolean opened) { this.opened = opened; }
+
+    public boolean isStarred() { return starred; }
+    public void setStarred(boolean starred) { this.starred = starred; }
 }
