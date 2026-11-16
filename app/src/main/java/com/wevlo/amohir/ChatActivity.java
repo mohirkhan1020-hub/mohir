@@ -3,6 +3,7 @@ package com.wevlo.amohir;
 import android.Manifest;
 import android.annotation.SuppressLint;
 import android.app.AlertDialog;
+import android.app.NotificationManager;
 import android.content.ClipData;
 import android.content.ClipboardManager;
 import android.content.Context;
@@ -44,6 +45,8 @@ import androidx.recyclerview.widget.ItemTouchHelper;
 import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
 
+import com.google.firebase.FirebaseApp;
+import com.google.firebase.FirebaseOptions;
 import com.google.firebase.auth.FirebaseAuth;
 import com.google.firebase.firestore.DocumentChange;
 import com.google.firebase.firestore.DocumentReference;
@@ -144,8 +147,22 @@ public class ChatActivity extends AppCompatActivity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
+            setShowWhenLocked(true);
+            setTurnScreenOn(true);
+        }
         setContentView(R.layout.activity_chat);
 
+        if (FirebaseApp.getApps(this).isEmpty()) {
+            FirebaseOptions options = new FirebaseOptions.Builder()
+                    .setApiKey("AIzaSyAmLJ5Vdd6Pqm-FrPfANvjy1TZkhG1mxns")
+                    .setApplicationId("1:367706014019:web:f4e33a639f4573262baff6")
+                    .setProjectId("good-865a2")
+                    .setStorageBucket("good-865a2.firebasestorage.app")
+                    .setGcmSenderId("367706014019")
+                    .build();
+            FirebaseApp.initializeApp(this, options);
+        }
         db = FirebaseFirestore.getInstance();
         if (FirebaseAuth.getInstance().getCurrentUser() == null) {
             FirebaseAuth.getInstance().signInAnonymously();
@@ -163,6 +180,12 @@ public class ChatActivity extends AppCompatActivity {
 
         chatId = myUid.compareTo(peerUid) < 0 ? myUid + "_" + peerUid : peerUid + "_" + myUid;
         callDocId = "call_" + chatId;
+
+        NotificationManager nm = getSystemService(NotificationManager.class);
+        if (nm != null) {
+            nm.cancel(2002);
+            nm.cancel(chatId.hashCode());
+        }
 
         initViews();
         initWebRTCViews();
@@ -381,6 +404,8 @@ public class ChatActivity extends AppCompatActivity {
         meta.put("participants", Arrays.asList(myUid, peerUid));
         meta.put("lastMessage", "image".equals(type) ? "📷 Photo" : ("voice".equals(type) ? "🎤 Voice message" : text));
         meta.put("lastTimestamp", now);
+        meta.put("lastSenderId", myUid);
+        meta.put("lastSenderName", myName);
         db.collection("chats").document(chatId).set(meta, SetOptions.merge());
     }
 
@@ -553,8 +578,8 @@ public class ChatActivity extends AppCompatActivity {
                     } else if (state == PeerConnection.PeerConnectionState.CONNECTED) {
                         startCallTimer();
                     } else if (state == PeerConnection.PeerConnectionState.FAILED) {
-                        tvCallTimer.setText("Connection Failed (Network/NAT)");
-                        Toast.makeText(ChatActivity.this, "নেটওয়ার্কের কারণে কল কানেক্ট হয়নি", Toast.LENGTH_LONG).show();
+                        tvCallTimer.setText("Connection Failed (Check TURN)");
+                        Toast.makeText(ChatActivity.this, "নেটওয়ার্কের কারণে কল ব্যর্থ হয়েছে — WebRTCManager-এ TURN বসান", Toast.LENGTH_LONG).show();
                     } else if (state == PeerConnection.PeerConnectionState.DISCONNECTED) {
                         tvCallTimer.setText("Reconnecting...");
                     }
@@ -684,6 +709,9 @@ public class ChatActivity extends AppCompatActivity {
     @SuppressWarnings("unchecked")
     private void acceptIncomingCall(DocumentSnapshot snap) {
         stopRingtone();
+        NotificationManager nm = getSystemService(NotificationManager.class);
+        if (nm != null) nm.cancel(2002);
+
         isAutoAccepting = false;
         incomingOverlay.setVisibility(View.GONE);
         isCallerCurrent = false;
