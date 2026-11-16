@@ -35,6 +35,9 @@ import java.util.List;
 
 public class WebRTCManager {
 
+    private static final String TURN_USERNAME = "17b22c937180a3b673ac074d";
+    private static final String TURN_PASSWORD = "fxt4t0cdkpDmhVzw";
+
     public interface Callback {
         void onIceCandidateGenerated(IceCandidate candidate);
         void onRemoteStreamAdded(VideoTrack videoTrack);
@@ -71,8 +74,7 @@ public class WebRTCManager {
         this.callback = callback;
 
         PeerConnectionFactory.initialize(
-                PeerConnectionFactory.InitializationOptions.builder(this.context)
-                        .createInitializationOptions()
+                PeerConnectionFactory.InitializationOptions.builder(this.context).createInitializationOptions()
         );
 
         audioDeviceModule = JavaAudioDeviceModule.builder(this.context)
@@ -122,19 +124,17 @@ public class WebRTCManager {
 
     private CameraVideoCapturer createCameraCapturer() {
         CameraEnumerator enumerator = Camera2Enumerator.isSupported(context)
-                ? new Camera2Enumerator(context)
-                : new Camera1Enumerator(true);
-
+                ? new Camera2Enumerator(context) : new Camera1Enumerator(true);
         for (String name : enumerator.getDeviceNames()) {
             if (enumerator.isFrontFacing(name)) {
-                CameraVideoCapturer capturer = enumerator.createCapturer(name, null);
-                if (capturer != null) return capturer;
+                CameraVideoCapturer c = enumerator.createCapturer(name, null);
+                if (c != null) return c;
             }
         }
         for (String name : enumerator.getDeviceNames()) {
             if (!enumerator.isFrontFacing(name)) {
-                CameraVideoCapturer capturer = enumerator.createCapturer(name, null);
-                if (capturer != null) return capturer;
+                CameraVideoCapturer c = enumerator.createCapturer(name, null);
+                if (c != null) return c;
             }
         }
         return null;
@@ -149,34 +149,46 @@ public class WebRTCManager {
         List<PeerConnection.IceServer> iceServers = new ArrayList<>();
         iceServers.add(PeerConnection.IceServer.builder("stun:stun.l.google.com:19302").createIceServer());
         iceServers.add(PeerConnection.IceServer.builder("stun:stun1.l.google.com:19302").createIceServer());
-        iceServers.add(PeerConnection.IceServer.builder("stun:stun2.l.google.com:19302").createIceServer());
-        iceServers.add(PeerConnection.IceServer.builder("stun:stun3.l.google.com:19302").createIceServer());
+        iceServers.add(PeerConnection.IceServer.builder("stun:stun.relay.metered.ca:80").createIceServer());
+
+        // Metered TURN Servers (Free & Global)
+        iceServers.add(PeerConnection.IceServer.builder("turn:standard.relay.metered.ca:80")
+                .setUsername(TURN_USERNAME).setPassword(TURN_PASSWORD).createIceServer());
+        iceServers.add(PeerConnection.IceServer.builder("turn:standard.relay.metered.ca:80?transport=tcp")
+                .setUsername(TURN_USERNAME).setPassword(TURN_PASSWORD).createIceServer());
+        iceServers.add(PeerConnection.IceServer.builder("turn:standard.relay.metered.ca:443")
+                .setUsername(TURN_USERNAME).setPassword(TURN_PASSWORD).createIceServer());
+        iceServers.add(PeerConnection.IceServer.builder("turns:standard.relay.metered.ca:443?transport=tcp")
+                .setUsername(TURN_USERNAME).setPassword(TURN_PASSWORD).createIceServer());
+        iceServers.add(PeerConnection.IceServer.builder("turn:global.relay.metered.ca:80")
+                .setUsername(TURN_USERNAME).setPassword(TURN_PASSWORD).createIceServer());
+        iceServers.add(PeerConnection.IceServer.builder("turn:global.relay.metered.ca:443")
+                .setUsername(TURN_USERNAME).setPassword(TURN_PASSWORD).createIceServer());
 
         PeerConnection.RTCConfiguration rtcConfig = new PeerConnection.RTCConfiguration(iceServers);
         rtcConfig.sdpSemantics = PeerConnection.SdpSemantics.UNIFIED_PLAN;
         rtcConfig.continualGatheringPolicy = PeerConnection.ContinualGatheringPolicy.GATHER_CONTINUALLY;
 
         peerConnection = factory.createPeerConnection(rtcConfig, new PeerConnection.Observer() {
-            @Override
-            public void onIceCandidate(IceCandidate candidate) {
-                callback.onIceCandidateGenerated(candidate);
-            }
+            @Override public void onIceCandidate(IceCandidate candidate) { callback.onIceCandidateGenerated(candidate); }
 
             @Override
             public void onTrack(RtpTransceiver transceiver) {
                 MediaStreamTrack track = transceiver.getReceiver().track();
-                if (track instanceof VideoTrack) {
-                    callback.onRemoteStreamAdded((VideoTrack) track);
-                }
+                if (track instanceof VideoTrack) callback.onRemoteStreamAdded((VideoTrack) track);
             }
 
             @Override
-            public void onConnectionChange(PeerConnection.PeerConnectionState newState) {
-                callback.onConnectionStateChanged(newState);
+            public void onIceConnectionChange(PeerConnection.IceConnectionState newState) {
+                if (newState == PeerConnection.IceConnectionState.CONNECTED || newState == PeerConnection.IceConnectionState.COMPLETED) {
+                    callback.onConnectionStateChanged(PeerConnection.PeerConnectionState.CONNECTED);
+                } else if (newState == PeerConnection.IceConnectionState.FAILED) {
+                    callback.onConnectionStateChanged(PeerConnection.PeerConnectionState.FAILED);
+                }
             }
 
+            @Override public void onConnectionChange(PeerConnection.PeerConnectionState newState) { callback.onConnectionStateChanged(newState); }
             @Override public void onSignalingChange(PeerConnection.SignalingState s) {}
-            @Override public void onIceConnectionChange(PeerConnection.IceConnectionState s) {}
             @Override public void onIceConnectionReceivingChange(boolean b) {}
             @Override public void onIceGatheringChange(PeerConnection.IceGatheringState s) {}
             @Override public void onIceCandidatesRemoved(IceCandidate[] c) {}
@@ -199,17 +211,14 @@ public class WebRTCManager {
         MediaConstraints constraints = new MediaConstraints();
         constraints.mandatory.add(new MediaConstraints.KeyValuePair("OfferToReceiveAudio", "true"));
         constraints.mandatory.add(new MediaConstraints.KeyValuePair("OfferToReceiveVideo", String.valueOf(isVideoCall)));
-
         peerConnection.createOffer(new SimpleSdpObserver() {
-            @Override
-            public void onCreateSuccess(SessionDescription sdp) {
+            @Override public void onCreateSuccess(SessionDescription sdp) {
                 peerConnection.setLocalDescription(new SimpleSdpObserver() {
                     @Override public void onSetSuccess() { listener.onSuccess(sdp); }
                     @Override public void onSetFailure(String err) { callback.onError("Local SDP error: " + err); }
                 }, sdp);
             }
-            @Override
-            public void onCreateFailure(String err) { callback.onError("Offer error: " + err); }
+            @Override public void onCreateFailure(String err) { callback.onError("Offer error: " + err); }
         }, constraints);
     }
 
@@ -218,17 +227,14 @@ public class WebRTCManager {
         MediaConstraints constraints = new MediaConstraints();
         constraints.mandatory.add(new MediaConstraints.KeyValuePair("OfferToReceiveAudio", "true"));
         constraints.mandatory.add(new MediaConstraints.KeyValuePair("OfferToReceiveVideo", String.valueOf(isVideoCall)));
-
         peerConnection.createAnswer(new SimpleSdpObserver() {
-            @Override
-            public void onCreateSuccess(SessionDescription sdp) {
+            @Override public void onCreateSuccess(SessionDescription sdp) {
                 peerConnection.setLocalDescription(new SimpleSdpObserver() {
                     @Override public void onSetSuccess() { listener.onSuccess(sdp); }
                     @Override public void onSetFailure(String err) { callback.onError("Local SDP error: " + err); }
                 }, sdp);
             }
-            @Override
-            public void onCreateFailure(String err) { callback.onError("Answer error: " + err); }
+            @Override public void onCreateFailure(String err) { callback.onError("Answer error: " + err); }
         }, constraints);
     }
 
@@ -236,22 +242,15 @@ public class WebRTCManager {
         if (peerConnection == null || type == null || sdp == null) return;
         SessionDescription.Type sdpType = SessionDescription.Type.fromCanonicalForm(type.toLowerCase());
         peerConnection.setRemoteDescription(new SimpleSdpObserver() {
-            @Override
-            public void onSetSuccess() {
+            @Override public void onSetSuccess() {
                 synchronized (iceLock) {
                     isRemoteSdpSet = true;
-                    for (IceCandidate c : pendingIceCandidates) {
-                        peerConnection.addIceCandidate(c);
-                    }
+                    for (IceCandidate c : pendingIceCandidates) peerConnection.addIceCandidate(c);
                     pendingIceCandidates.clear();
                 }
                 if (onSuccess != null) onSuccess.run();
             }
-
-            @Override
-            public void onSetFailure(String err) {
-                callback.onError("Remote SDP error: " + err);
-            }
+            @Override public void onSetFailure(String err) { callback.onError("Remote SDP error: " + err); }
         }, new SessionDescription(sdpType, sdp));
     }
 
@@ -259,62 +258,32 @@ public class WebRTCManager {
         if (peerConnection == null || candidate == null) return;
         IceCandidate ice = new IceCandidate(sdpMid, sdpMLineIndex, candidate);
         synchronized (iceLock) {
-            if (isRemoteSdpSet) {
-                peerConnection.addIceCandidate(ice);
-            } else {
-                pendingIceCandidates.add(ice);
-            }
+            if (isRemoteSdpSet) peerConnection.addIceCandidate(ice);
+            else pendingIceCandidates.add(ice);
         }
     }
 
-    public void setMicEnabled(boolean enabled) {
-        if (localAudioTrack != null) localAudioTrack.setEnabled(enabled);
-    }
-
-    public void setCamEnabled(boolean enabled) {
-        if (localVideoTrack != null) localVideoTrack.setEnabled(enabled);
-    }
-
-    public void switchCamera() {
-        if (videoCapturer != null) videoCapturer.switchCamera(null);
-    }
+    public void setMicEnabled(boolean enabled) { if (localAudioTrack != null) localAudioTrack.setEnabled(enabled); }
+    public void setCamEnabled(boolean enabled) { if (localVideoTrack != null) localVideoTrack.setEnabled(enabled); }
+    public void switchCamera() { if (videoCapturer != null) videoCapturer.switchCamera(null); }
 
     public void endCall() {
-        synchronized (iceLock) {
-            isRemoteSdpSet = false;
-            pendingIceCandidates.clear();
-        }
+        synchronized (iceLock) { isRemoteSdpSet = false; pendingIceCandidates.clear(); }
         if (videoCapturer != null) {
             try { videoCapturer.stopCapture(); } catch (InterruptedException ignored) {}
-            videoCapturer.dispose();
-            videoCapturer = null;
+            videoCapturer.dispose(); videoCapturer = null;
         }
-        if (surfaceTextureHelper != null) {
-            surfaceTextureHelper.dispose();
-            surfaceTextureHelper = null;
-        }
-        if (videoSource != null) {
-            videoSource.dispose();
-            videoSource = null;
-        }
-        if (audioSource != null) {
-            audioSource.dispose();
-            audioSource = null;
-        }
-        if (peerConnection != null) {
-            peerConnection.close();
-            peerConnection = null;
-        }
-        localAudioTrack = null;
-        localVideoTrack = null;
+        if (surfaceTextureHelper != null) { surfaceTextureHelper.dispose(); surfaceTextureHelper = null; }
+        if (videoSource != null) { videoSource.dispose(); videoSource = null; }
+        if (audioSource != null) { audioSource.dispose(); audioSource = null; }
+        if (peerConnection != null) { peerConnection.close(); peerConnection = null; }
+        localAudioTrack = null; localVideoTrack = null;
     }
 
     public void destroyFactory() {
         endCall();
         factory.dispose();
-        if (audioDeviceModule != null) {
-            audioDeviceModule.release();
-        }
+        if (audioDeviceModule != null) audioDeviceModule.release();
     }
 
     private static class SimpleSdpObserver implements SdpObserver {
