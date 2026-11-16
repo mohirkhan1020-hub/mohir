@@ -19,15 +19,30 @@
             <View android:id="@+id/viewOnline" android:layout_width="14dp" android:layout_height="14dp" android:layout_gravity="bottom|end" android:background="@drawable/bg_wa_online_dot" android:visibility="gone" />
         </FrameLayout>
 
-        <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content" android:layout_marginStart="14dp" android:layout_weight="1" android:orientation="vertical">
-            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center_vertical">
-                <TextView android:id="@+id/tvName" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:ellipsize="end" android:maxLines="1" android:text="User" android:textColor="#E9EDEF" android:textSize="16.5sp" android:textStyle="bold" />
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="14dp"
+            android:layout_weight="1"
+            android:orientation="vertical">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:gravity="center_vertical">
+                <TextView android:id="@+id/tvName" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:ellipsize="end" android:maxLines="1" android:textColor="#E9EDEF" android:textSize="16.5sp" android:textStyle="bold" />
                 <TextView android:id="@+id/tvStatusTime" android:layout_width="wrap_content" android:layout_height="wrap_content" android:textColor="#8696A0" android:textSize="12sp" />
             </LinearLayout>
 
-            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="4dp" android:gravity="center_vertical">
-                <TextView android:id="@+id/tvAbout" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:ellipsize="end" android:maxLines="1" android:text="Hey there! I am using WhatsApp." android:textColor="#8696A0" android:textSize="13.5sp" />
-                <TextView android:id="@+id/tvUnreadBadge" android:layout_width="22dp" android:layout_height="22dp" android:layout_marginStart="8dp" android:background="@drawable/bg_wa_unread" android:gravity="center" android:text="1" android:textColor="#0B141A" android:textSize="11sp" android:textStyle="bold" android:visibility="gone" />
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="4dp"
+                android:gravity="center_vertical">
+                <TextView android:id="@+id/tvAbout" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:ellipsize="end" android:maxLines="1" android:textColor="#8696A0" android:textSize="13.5sp" />
+                <ImageView android:id="@+id/ivMute" android:layout_width="16dp" android:layout_height="16dp" android:layout_marginStart="6dp" android:src="@drawable/ic_mute" android:visibility="gone" />
+                <ImageView android:id="@+id/ivPin" android:layout_width="16dp" android:layout_height="16dp" android:layout_marginStart="6dp" android:src="@drawable/ic_pin" android:visibility="gone" />
+                <TextView android:id="@+id/tvUnreadBadge" android:layout_width="22dp" android:layout_height="22dp" android:layout_marginStart="8dp" android:background="@drawable/bg_wa_unread" android:gravity="center" android:textColor="#0B141A" android:textSize="11sp" android:textStyle="bold" android:visibility="gone" />
             </LinearLayout>
         </LinearLayout>
     </LinearLayout>
