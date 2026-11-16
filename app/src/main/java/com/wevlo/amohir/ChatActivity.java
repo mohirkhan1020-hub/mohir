@@ -176,14 +176,38 @@ public class ChatActivity extends AppCompatActivity {
             });
 
     private final ActivityResultLauncher<String> galleryLauncher =
-            registerForActivityResult(new ActivityResultContracts.GetContent(), uri -> { if (uri != null) processAndSendImage(uri); });
+            registerForActivityResult(new ActivityResultContracts.GetContent(), uri -> {
+                if (uri != null) showImageSendOptions(uri);
+            });
+
+    private final ActivityResultLauncher<Intent> doodleLauncher =
+            registerForActivityResult(new ActivityResultContracts.StartActivityForResult(), result -> {
+                if (result.getResultCode() == RESULT_OK && result.getData() != null) {
+                    String doodledB64 = result.getData().getStringExtra("doodledB64");
+                    if (doodledB64 != null) {
+                        sendMessage("", "image", doodledB64, null, null, null, false, false);
+                    }
+                }
+            });
+
     private final ActivityResultLauncher<String> wallpaperLauncher =
             registerForActivityResult(new ActivityResultContracts.GetContent(), uri -> { if (uri != null) saveCustomWallpaper(uri); });
     private final ActivityResultLauncher<String[]> fileLauncher =
             registerForActivityResult(new ActivityResultContracts.OpenDocument(), uri -> { if (uri != null) processAndSendFile(uri); });
     private final ActivityResultLauncher<Uri> cameraLauncher =
             registerForActivityResult(new ActivityResultContracts.TakePicture(), ok -> {
-                if (Boolean.TRUE.equals(ok) && cameraImageUri != null) processAndSendImage(cameraImageUri);
+                if (Boolean.TRUE.equals(ok) && cameraImageUri != null) showImageSendOptions(cameraImageUri);
+            });
+
+    private final ActivityResultLauncher<Intent> ringtonePickerLauncher =
+            registerForActivityResult(new ActivityResultContracts.StartActivityForResult(), result -> {
+                if (result.getResultCode() == RESULT_OK && result.getData() != null) {
+                    Uri uri = result.getData().getParcelableExtra(RingtoneManager.EXTRA_RINGTONE_PICKED_URI);
+                    if (uri != null) {
+                        getSharedPreferences("DivineWA", MODE_PRIVATE).edit().putString("ring_" + peerUid, uri.toString()).apply();
+                        Toast.makeText(this, "Custom ringtone saved!", Toast.LENGTH_SHORT).show();
+                    }
+                }
             });
 
     @Override
@@ -212,6 +236,7 @@ public class ChatActivity extends AppCompatActivity {
         if (isGroup) {
             chatId = getIntent().getStringExtra("groupId");
             if (chatId == null || chatId.isEmpty()) { finish(); return; }
+            callDocId = "call_" + chatId;
             loadGroupMembers();
         } else {
             if (peerUid == null || peerUid.isEmpty()) { finish(); return; }
@@ -227,9 +252,10 @@ public class ChatActivity extends AppCompatActivity {
         resetUnreadCount();
         listenMessages();
 
+        initWebRTCViews();
+        setupDraggableLocalView();
+
         if (!isGroup) {
-            initWebRTCViews();
-            setupDraggableLocalView();
             listenPeerStatus();
             listenBlockStatus();
 
@@ -242,6 +268,10 @@ public class ChatActivity extends AppCompatActivity {
                     else isAutoAccepting = false;
                 });
             } else if (autoStartCall != null) checkPermissionsAndStartCall(autoStartCall);
+            listenIncomingCalls();
+        } else {
+            String autoStartCall = getIntent().getStringExtra("autoStartCall");
+            if (autoStartCall != null) checkPermissionsAndStartCall(autoStartCall);
             listenIncomingCalls();
         }
 
@@ -297,9 +327,16 @@ public class ChatActivity extends AppCompatActivity {
         tvChatName.setText(peerName != null ? peerName : (isGroup ? "Private Group" : peerUid));
         if (isGroup) {
             tvChatAvatar.setText("👥");
-            tvChatStatus.setText("Group chat");
-            findViewById(R.id.btnAudioCall).setVisibility(View.GONE);
-            findViewById(R.id.btnVideoCall).setVisibility(View.GONE);
+            tvChatStatus.setText("Group Info");
+            View.OnClickListener openGroupInfo = v -> {
+                Intent i = new Intent(this, GroupInfoActivity.class);
+                i.putExtra("groupId", chatId);
+                i.putExtra("groupName", tvChatName.getText().toString());
+                startActivity(i);
+            };
+            tvChatName.setOnClickListener(openGroupInfo);
+            tvChatStatus.setOnClickListener(openGroupInfo);
+            tvChatAvatar.setOnClickListener(openGroupInfo);
         } else {
             String peerAvatar = getIntent().getStringExtra("peerAvatar");
             if (peerAvatar != null && !peerAvatar.isEmpty()) {
@@ -319,7 +356,10 @@ public class ChatActivity extends AppCompatActivity {
             tvChatAvatar.setOnClickListener(openProfileClick); ivChatAvatar.setOnClickListener(openProfileClick);
         }
 
-        adapter = new MessageAdapter(displayMessages, myUid, isGroup, this::showMessageOptionsDialog);
+        adapter = new MessageAdapter(displayMessages, myUid, isGroup, new MessageAdapter.OnMessageActionListener() {
+            @Override public void onLongClick(MessageModel message) { showMessageOptionsDialog(message); }
+            @Override public void onViewOnceClick(MessageModel message) { openViewOnceMedia(message); }
+        });
         rvMessages.setLayoutManager(new LinearLayoutManager(this)); rvMessages.setAdapter(adapter);
 
         new ItemTouchHelper(new ItemTouchHelper.SimpleCallback(0, ItemTouchHelper.RIGHT) {
@@ -363,7 +403,7 @@ public class ChatActivity extends AppCompatActivity {
 
         btnSendOrMic.setOnClickListener(v -> {
             String txt = etMessage.getText().toString().trim();
-            if (!txt.isEmpty()) { etMessage.setText(""); sendMessage(txt, "text", null, null, null, null, false); }
+            if (!txt.isEmpty()) { etMessage.setText(""); sendMessage(txt, "text", null, null, null, null, false, false); }
             else startVoiceRecording();
         });
 
@@ -390,11 +430,51 @@ public class ChatActivity extends AppCompatActivity {
         btnSpeaker.setOnClickListener(v -> showAudioOutputChooserOrToggle());
     }
 
+    private void showImageSendOptions(Uri imageUri) {
+        String[] opts = {"Send Normal Photo", "Send View Once (① একবার দেখার ছবি)", "✏️ Doodle / Draw on Photo"};
+        new AlertDialog.Builder(this).setTitle("Photo Options").setItems(opts, (d, which) -> {
+            if (which == 0) processAndSendImage(imageUri, false);
+            else if (which == 1) processAndSendImage(imageUri, true);
+            else {
+                Intent i = new Intent(this, DoodleActivity.class);
+                i.putExtra("imageUri", imageUri.toString());
+                doodleLauncher.launch(i);
+            }
+        }).show();
+    }
+
+    private void openViewOnceMedia(MessageModel m) {
+        if (m.getMediaUrl() == null || m.isOpened()) return;
+        byte[] bytes = Base64.decode(m.getMediaUrl(), Base64.DEFAULT);
+        Bitmap bmp = BitmapFactory.decodeByteArray(bytes, 0, bytes.length);
+        if (bmp == null) return;
+
+        ImageView iv = new ImageView(this);
+        iv.setImageBitmap(bmp);
+        iv.setAdjustViewBounds(true);
+
+        new AlertDialog.Builder(this)
+                .setTitle("① View Once Photo")
+                .setView(iv)
+                .setPositiveButton("Close", (d, w) -> {
+                    db.collection("chats").document(chatId).collection("messages").document(m.getId())
+                            .update("opened", true, "mediaUrl", null);
+                })
+                .setCancelable(false)
+                .show();
+    }
+
     private void showChatMoreMenu() {
         List<String> items = new ArrayList<>();
         items.add("🔍 Search Messages");
         items.add("🖼️ Change Wallpaper");
-        if (!isGroup) items.add(iBlockedPeer ? "✅ Unblock Contact" : "🚫 Block Contact");
+        items.add("⏱️ Disappearing Messages");
+        if (!isGroup) {
+            items.add("🔔 Custom Ringtone");
+            items.add(iBlockedPeer ? "✅ Unblock Contact" : "🚫 Block Contact");
+        } else {
+            items.add("👥 Group Info");
+        }
         items.add("🧹 Clear Chat");
 
         new AlertDialog.Builder(this).setItems(items.toArray(new String[0]), (d, which) -> {
@@ -403,6 +483,16 @@ public class ChatActivity extends AppCompatActivity {
                 chatSearchBar.setVisibility(View.VISIBLE); etChatSearch.requestFocus();
             } else if (sel.contains("Wallpaper")) {
                 showWallpaperPicker();
+            } else if (sel.contains("Disappearing")) {
+                showDisappearingDialog();
+            } else if (sel.contains("Custom Ringtone")) {
+                Intent intent = new Intent(RingtoneManager.ACTION_RINGTONE_PICKER);
+                intent.putExtra(RingtoneManager.EXTRA_RINGTONE_TYPE, RingtoneManager.TYPE_RINGTONE);
+                ringtonePickerLauncher.launch(intent);
+            } else if (sel.contains("Group Info")) {
+                Intent i = new Intent(this, GroupInfoActivity.class);
+                i.putExtra("groupId", chatId); i.putExtra("groupName", tvChatName.getText().toString());
+                startActivity(i);
             } else if (sel.contains("Block") || sel.contains("Unblock")) {
                 if (iBlockedPeer) db.collection("users").document(myUid).collection("blocked").document(peerUid).delete();
                 else {
@@ -415,6 +505,18 @@ public class ChatActivity extends AppCompatActivity {
                     Toast.makeText(this, "Chat cleared", Toast.LENGTH_SHORT).show();
                 });
             }
+        }).show();
+    }
+
+    private void showDisappearingDialog() {
+        String[] opts = {"Off", "24 Hours", "7 Days", "90 Days"};
+        new AlertDialog.Builder(this).setTitle("Disappearing Messages").setItems(opts, (d, which) -> {
+            long duration = 0;
+            if (which == 1) duration = 24 * 3600 * 1000L;
+            else if (which == 2) duration = 7 * 86400 * 1000L;
+            else if (which == 3) duration = 90L * 86400 * 1000L;
+            getSharedPreferences("DivineWA", MODE_PRIVATE).edit().putLong("disappear_" + chatId, duration).apply();
+            Toast.makeText(this, "Timer set: " + opts[which], Toast.LENGTH_SHORT).show();
         }).show();
     }
 
@@ -510,7 +612,7 @@ public class ChatActivity extends AppCompatActivity {
                 if (baos.size() > 620000) { Toast.makeText(this, "File too large (Max 600KB)", Toast.LENGTH_LONG).show(); return; }
             }
             String b64 = Base64.encodeToString(baos.toByteArray(), Base64.NO_WRAP);
-            sendMessage("", "file", b64, null, name, null, false);
+            sendMessage("", "file", b64, null, name, null, false, false);
         } catch (Exception e) { Toast.makeText(this, "File read failed", Toast.LENGTH_SHORT).show(); }
     }
 
@@ -526,22 +628,34 @@ public class ChatActivity extends AppCompatActivity {
             if (loc == null) loc = lm.getLastKnownLocation(LocationManager.NETWORK_PROVIDER);
             if (loc != null) {
                 String latLng = loc.getLatitude() + "," + loc.getLongitude();
-                sendMessage("📍 Location", "location", null, null, null, latLng, false);
+                sendMessage("📍 Location", "location", null, null, null, latLng, false, false);
             } else Toast.makeText(this, "Turn on GPS Location and try again", Toast.LENGTH_SHORT).show();
         } catch (Exception e) { Toast.makeText(this, "Location failed", Toast.LENGTH_SHORT).show(); }
     }
 
     private void listenMessages() {
         msgListener = db.collection("chats").document(chatId).collection("messages")
-                .orderBy("timestamp", Query.Direction.ASCENDING).limitToLast(100)
+                .orderBy("timestamp", Query.Direction.ASCENDING).limitToLast(120)
                 .addSnapshotListener((snaps, err) -> {
                     if (snaps == null) return;
+                    long now = System.currentTimeMillis();
                     for (DocumentChange dc : snaps.getDocumentChanges()) {
                         MessageModel m = dc.getDocument().toObject(MessageModel.class);
                         m.setId(dc.getDocument().getId());
+
+                        // Disappearing Messages অটো মুছে ফেলা
+                        if (m.getExpireAt() > 0 && now > m.getExpireAt()) {
+                            dc.getDocument().getReference().delete();
+                            continue;
+                        }
+
                         if (dc.getType() == DocumentChange.Type.ADDED) {
                             allMessages.add(m);
-                            if (!myUid.equals(m.getSenderId()) && !m.isSeen()) dc.getDocument().getReference().update("seen", true);
+                            // Read receipts (নীল টিক অন থাকলে)
+                            boolean readReceiptsOn = getSharedPreferences("DivineWA", MODE_PRIVATE).getBoolean("read_receipts", true);
+                            if (!myUid.equals(m.getSenderId()) && !m.isSeen() && readReceiptsOn) {
+                                dc.getDocument().getReference().update("seen", true);
+                            }
                         } else if (dc.getType() == DocumentChange.Type.MODIFIED) {
                             for (int i = 0; i < allMessages.size(); i++) if (allMessages.get(i).getId().equals(m.getId())) { allMessages.set(i, m); break; }
                         } else if (dc.getType() == DocumentChange.Type.REMOVED) {
@@ -554,14 +668,19 @@ public class ChatActivity extends AppCompatActivity {
                 });
     }
 
-    private void sendMessage(String text, String type, String mediaUrl, String voiceDuration, String fileName, String latLng, boolean forwarded) {
+    private void sendMessage(String text, String type, String mediaUrl, String voiceDuration, String fileName, String latLng, boolean forwarded, boolean viewOnce) {
         if (iBlockedPeer || peerBlockedMe) return;
         long now = System.currentTimeMillis();
+        long disappearTimer = getSharedPreferences("DivineWA", MODE_PRIVATE).getLong("disappear_" + chatId, 0);
+
         Map<String, Object> msg = new HashMap<>();
         msg.put("text", text); msg.put("type", type); msg.put("mediaUrl", mediaUrl);
         msg.put("voiceDuration", voiceDuration); msg.put("fileName", fileName); msg.put("latLng", latLng);
         msg.put("senderId", myUid); msg.put("senderName", myName); msg.put("timestamp", now);
         msg.put("seen", false); msg.put("reaction", ""); msg.put("forwarded", forwarded);
+        msg.put("viewOnce", viewOnce); msg.put("opened", false);
+        msg.put("starred", false);
+        if (disappearTimer > 0) msg.put("expireAt", now + disappearTimer);
 
         if (replyingToMsg != null) {
             msg.put("replyToSender", replyingToMsg.getSenderName() != null ? replyingToMsg.getSenderName() : "Message");
@@ -572,8 +691,8 @@ public class ChatActivity extends AppCompatActivity {
         }
         db.collection("chats").document(chatId).collection("messages").add(msg);
 
-        String preview = "image".equals(type) ? "📷 Photo" : ("voice".equals(type) ? "🎤 Voice"
-                : ("file".equals(type) ? "📄 " + fileName : ("location".equals(type) ? "📍 Location" : text)));
+        String preview = viewOnce ? "① Photo" : ("image".equals(type) ? "📷 Photo" : ("voice".equals(type) ? "🎤 Voice"
+                : ("file".equals(type) ? "📄 " + fileName : ("location".equals(type) ? "📍 Location" : text))));
         Map<String, Object> meta = new HashMap<>();
         meta.put("lastMessage", preview); meta.put("lastTimestamp", now);
         meta.put("lastSenderId", myUid); meta.put("lastSenderName", myName);
@@ -589,7 +708,9 @@ public class ChatActivity extends AppCompatActivity {
     private void showMessageOptionsDialog(MessageModel m) {
         if (m.isDeleted()) return;
         List<String> opts = new ArrayList<>();
-        opts.add("↩️ Reply"); opts.add("😊 React"); opts.add("↪ Forward");
+        opts.add("↩️ Reply"); opts.add("😊 React");
+        opts.add(m.isStarred() ? "★ Unstar Message" : "★ Star Message");
+        opts.add("↪ Forward");
         if ("text".equals(m.getType()) && m.getText() != null) opts.add("📋 Copy");
         if (myUid.equals(m.getSenderId()) && "text".equals(m.getType())) opts.add("✏️ Edit");
         if (myUid.equals(m.getSenderId())) opts.add("🗑️ Delete for Everyone");
@@ -598,7 +719,11 @@ public class ChatActivity extends AppCompatActivity {
             String choice = opts.get(which);
             if (choice.contains("Reply")) triggerReply(m);
             else if (choice.contains("React")) showReactionPicker(m);
-            else if (choice.contains("Forward")) showForwardDialog(m);
+            else if (choice.contains("Star") || choice.contains("Unstar")) {
+                db.collection("chats").document(chatId).collection("messages").document(m.getId())
+                        .update("starred", !m.isStarred());
+                Toast.makeText(this, !m.isStarred() ? "Starred!" : "Unstarred", Toast.LENGTH_SHORT).show();
+            } else if (choice.contains("Forward")) showForwardDialog(m);
             else if (choice.contains("Edit")) showEditDialog(m);
             else if (choice.contains("Copy")) {
                 ((ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE)).setPrimaryClip(ClipData.newPlainText("msg", m.getText()));
@@ -685,11 +810,13 @@ public class ChatActivity extends AppCompatActivity {
         if (audioManager == null) return false;
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             for (AudioDeviceInfo dev : audioManager.getAvailableCommunicationDevices()) {
-                if (dev.getType() == AudioDeviceInfo.TYPE_BLE_HEADSET || dev.getType() == AudioDeviceInfo.TYPE_BLUETOOTH_SCO) return true;
+                int t = dev.getType();
+                if (t == AudioDeviceInfo.TYPE_BLE_HEADSET || t == AudioDeviceInfo.TYPE_BLUETOOTH_SCO) return true;
             }
         }
         for (AudioDeviceInfo dev : audioManager.getDevices(AudioManager.GET_DEVICES_OUTPUTS)) {
-            if (dev.getType() == AudioDeviceInfo.TYPE_BLUETOOTH_SCO || dev.getType() == AudioDeviceInfo.TYPE_BLUETOOTH_A2DP) return true;
+            int t = dev.getType();
+            if (t == AudioDeviceInfo.TYPE_BLUETOOTH_SCO || t == AudioDeviceInfo.TYPE_BLUETOOTH_A2DP) return true;
         }
         return false;
     }
@@ -828,7 +955,7 @@ public class ChatActivity extends AppCompatActivity {
                     byte[] buf = new byte[4096]; int read;
                     while ((read = fis.read(buf)) != -1) baos.write(buf, 0, read);
                     String b64 = Base64.encodeToString(baos.toByteArray(), Base64.NO_WRAP);
-                    runOnUiThread(() -> sendMessage("", "voice", b64, durText, null, null, false));
+                    runOnUiThread(() -> sendMessage("", "voice", b64, durText, null, null, false, false));
                 } catch (Exception ignored) {}
             }).start();
         }
@@ -844,17 +971,17 @@ public class ChatActivity extends AppCompatActivity {
         } catch (Exception e) { Toast.makeText(this, "Camera failed", Toast.LENGTH_SHORT).show(); }
     }
 
-    private void processAndSendImage(Uri uri) {
+    private void processAndSendImage(Uri uri, boolean viewOnce) {
         Toast.makeText(this, "Sending photo...", Toast.LENGTH_SHORT).show();
         new Thread(() -> {
             try (InputStream is = getContentResolver().openInputStream(uri)) {
                 Bitmap orig = BitmapFactory.decodeStream(is); if (orig == null) return;
-                int w = orig.getWidth(), h = orig.getHeight(), max = 500;
+                int w = orig.getWidth(), h = orig.getHeight(), max = 700;
                 if (w > h && w > max) { h = Math.round((float) h * max / w); w = max; } else if (h > max) { w = Math.round((float) w * max / h); h = max; }
                 Bitmap res = Bitmap.createScaledBitmap(orig, w, h, true);
-                ByteArrayOutputStream baos = new ByteArrayOutputStream(); res.compress(Bitmap.CompressFormat.JPEG, 50, baos);
-                String b64 = "data:image/jpeg;base64," + Base64.encodeToString(baos.toByteArray(), Base64.NO_WRAP);
-                runOnUiThread(() -> sendMessage("", "image", b64, null, null, null, false));
+                ByteArrayOutputStream baos = new ByteArrayOutputStream(); res.compress(Bitmap.CompressFormat.JPEG, 60, baos);
+                String b64 = Base64.encodeToString(baos.toByteArray(), Base64.NO_WRAP);
+                runOnUiThread(() -> sendMessage("", "image", b64, null, null, null, false, viewOnce));
             } catch (Exception ignored) {}
         }).start();
     }
@@ -868,35 +995,6 @@ public class ChatActivity extends AppCompatActivity {
             grid.addView(tv);
         }
         dialog.show();
-    }
-
-    private void onScreenShareButtonClick() {
-        if (!"video".equals(activeCallType)) { Toast.makeText(this, "স্ক্রিন শেয়ার করার জন্য Video Call দিন", Toast.LENGTH_SHORT).show(); return; }
-        if (webRTCManager.isScreenSharing()) {
-            webRTCManager.stopScreenShare(); stopService(new Intent(this, ScreenShareService.class)); btnScreenShare.clearColorFilter();
-            return;
-        }
-        String[] opts = {"📱 Share My Screen", "📲 Request Friend's Screen"};
-        new AlertDialog.Builder(this).setTitle("Screen Share").setItems(opts, (d, which) -> {
-            if (which == 0) launchMyScreenSharePrompt();
-            else {
-                Map<String, Object> req = new HashMap<>(); req.put("screenRequestTarget", peerUid); req.put("screenRequestTime", System.currentTimeMillis());
-                db.collection("calls").document(callDocId).set(req, SetOptions.merge());
-                Toast.makeText(this, "অন্য ফোনে স্ক্রিন শেয়ার পপআপ পাঠানো হয়েছে!", Toast.LENGTH_SHORT).show();
-            }
-        }).show();
-    }
-
-    private void launchMyScreenSharePrompt() {
-        MediaProjectionManager mpm = (MediaProjectionManager) getSystemService(Context.MEDIA_PROJECTION_SERVICE);
-        if (mpm != null) screenShareLauncher.launch(mpm.createScreenCaptureIntent());
-    }
-
-    private void handleRemoteScreenRequest(DocumentSnapshot snap) {
-        String target = snap.getString("screenRequestTarget"); Long reqTime = snap.getLong("screenRequestTime");
-        if (myUid.equals(target) && reqTime != null && reqTime > lastScreenReqTime && callOverlay.getVisibility() == View.VISIBLE && !webRTCManager.isScreenSharing()) {
-            lastScreenReqTime = reqTime; launchMyScreenSharePrompt();
-        }
     }
 
     private void initWebRTCViews() {
@@ -986,7 +1084,7 @@ public class ChatActivity extends AppCompatActivity {
     }
 
     private void requestCallPermissionsAndRun(Runnable action) {
-        if (iBlockedPeer || peerBlockedMe) { Toast.makeText(this, "Call unavailable (blocked)", Toast.LENGTH_SHORT).show(); return; }
+        if (!isGroup && (iBlockedPeer || peerBlockedMe)) { Toast.makeText(this, "Call unavailable (blocked)", Toast.LENGTH_SHORT).show(); return; }
         List<String> needed = new ArrayList<>();
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) needed.add(Manifest.permission.CAMERA);
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) needed.add(Manifest.permission.RECORD_AUDIO);
@@ -1018,7 +1116,8 @@ public class ChatActivity extends AppCompatActivity {
             webRTCManager.createOffer(offer -> {
                 Map<String, Object> offerMap = new HashMap<>(); offerMap.put("type", offer.type.canonicalForm()); offerMap.put("sdp", offer.description);
                 Map<String, Object> callData = new HashMap<>();
-                callData.put("callerId", myUid); callData.put("callerName", myName); callData.put("receiverId", peerUid);
+                callData.put("callerId", myUid); callData.put("callerName", myName);
+                callData.put("receiverId", isGroup ? chatId : peerUid);
                 callData.put("receiverName", tvChatName.getText().toString()); callData.put("type", type);
                 callData.put("status", "calling"); callData.put("offer", offerMap); callData.put("createdAt", System.currentTimeMillis());
 
@@ -1119,15 +1218,19 @@ public class ChatActivity extends AppCompatActivity {
 
     private void logCallHistory(String type) {
         Map<String, Object> log = new HashMap<>();
-        log.put("callerId", myUid); log.put("callerName", myName); log.put("receiverId", peerUid);
-        log.put("receiverName", tvChatName.getText().toString()); log.put("participants", Arrays.asList(myUid, peerUid));
+        log.put("callerId", myUid); log.put("callerName", myName);
+        log.put("receiverId", isGroup ? chatId : peerUid);
+        log.put("receiverName", tvChatName.getText().toString());
+        log.put("participants", isGroup ? groupMembers : Arrays.asList(myUid, peerUid));
         log.put("type", type); log.put("timestamp", System.currentTimeMillis());
         db.collection("call_logs").add(log);
     }
 
     private void playRingtone() {
         try {
-            if (ringtone == null) ringtone = RingtoneManager.getRingtone(this, RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE));
+            String customUri = getSharedPreferences("DivineWA", MODE_PRIVATE).getString("ring_" + peerUid, null);
+            Uri uri = customUri != null ? Uri.parse(customUri) : RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE);
+            ringtone = RingtoneManager.getRingtone(this, uri);
             if (ringtone != null && !ringtone.isPlaying()) ringtone.play();
         } catch (Exception ignored) {}
     }
@@ -1210,12 +1313,11 @@ public class ChatActivity extends AppCompatActivity {
         if (timerRunnable != null) { timerHandler.removeCallbacks(timerRunnable); timerRunnable = null; }
         if (callListener != null) { callListener.remove(); callListener = null; }
         if (candListener != null) { candListener.remove(); candListener = null; }
-        if (webRTCManager != null) webRTCManager.endCall();
-        if (localVideoView != null) localVideoView.clearImage();
-        if (remoteVideoView != null) remoteVideoView.clearImage();
+        webRTCManager.endCall();
+        localVideoView.clearImage(); remoteVideoView.clearImage();
         callOverlay.setVisibility(View.GONE); resetAudioRouting();
         if (notifyFirebase && callDocId != null) db.collection("calls").document(callDocId).update("status", "ended");
-        if (!isGroup && incomingListener == null) listenIncomingCalls();
+        listenIncomingCalls();
     }
 
     @Override protected void onStart() { super.onStart(); isChatOpen = true; }
