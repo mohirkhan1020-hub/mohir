@@ -18,7 +18,9 @@ import org.webrtc.MediaStream;
 import org.webrtc.MediaStreamTrack;
 import org.webrtc.PeerConnection;
 import org.webrtc.PeerConnectionFactory;
+import org.webrtc.RtpParameters;
 import org.webrtc.RtpReceiver;
+import org.webrtc.RtpSender;
 import org.webrtc.RtpTransceiver;
 import org.webrtc.SdpObserver;
 import org.webrtc.SessionDescription;
@@ -112,7 +114,7 @@ public class WebRTCManager {
                 try {
                     videoCapturer.startCapture(1280, 720, 30);
                 } catch (Exception e) {
-                    callback.onError("Camera error: " + e.getMessage());
+                    try { videoCapturer.startCapture(640, 480, 30); } catch (Exception ignored) {}
                 }
 
                 localView.setMirror(true);
@@ -144,28 +146,18 @@ public class WebRTCManager {
     }
 
     public void createPeerConnection() {
-        synchronized (iceLock) {
-            isRemoteSdpSet = false;
-            pendingIceCandidates.clear();
-        }
+        synchronized (iceLock) { isRemoteSdpSet = false; pendingIceCandidates.clear(); }
 
         List<PeerConnection.IceServer> iceServers = new ArrayList<>();
         iceServers.add(PeerConnection.IceServer.builder("stun:stun.l.google.com:19302").createIceServer());
         iceServers.add(PeerConnection.IceServer.builder("stun:stun1.l.google.com:19302").createIceServer());
         iceServers.add(PeerConnection.IceServer.builder("stun:stun.relay.metered.ca:80").createIceServer());
-
-        iceServers.add(PeerConnection.IceServer.builder("turn:standard.relay.metered.ca:80")
-                .setUsername(TURN_USERNAME).setPassword(TURN_PASSWORD).createIceServer());
-        iceServers.add(PeerConnection.IceServer.builder("turn:standard.relay.metered.ca:80?transport=tcp")
-                .setUsername(TURN_USERNAME).setPassword(TURN_PASSWORD).createIceServer());
-        iceServers.add(PeerConnection.IceServer.builder("turn:standard.relay.metered.ca:443")
-                .setUsername(TURN_USERNAME).setPassword(TURN_PASSWORD).createIceServer());
-        iceServers.add(PeerConnection.IceServer.builder("turns:standard.relay.metered.ca:443?transport=tcp")
-                .setUsername(TURN_USERNAME).setPassword(TURN_PASSWORD).createIceServer());
-        iceServers.add(PeerConnection.IceServer.builder("turn:global.relay.metered.ca:80")
-                .setUsername(TURN_USERNAME).setPassword(TURN_PASSWORD).createIceServer());
-        iceServers.add(PeerConnection.IceServer.builder("turn:global.relay.metered.ca:443")
-                .setUsername(TURN_USERNAME).setPassword(TURN_PASSWORD).createIceServer());
+        iceServers.add(PeerConnection.IceServer.builder("turn:standard.relay.metered.ca:80").setUsername(TURN_USERNAME).setPassword(TURN_PASSWORD).createIceServer());
+        iceServers.add(PeerConnection.IceServer.builder("turn:standard.relay.metered.ca:80?transport=tcp").setUsername(TURN_USERNAME).setPassword(TURN_PASSWORD).createIceServer());
+        iceServers.add(PeerConnection.IceServer.builder("turn:standard.relay.metered.ca:443").setUsername(TURN_USERNAME).setPassword(TURN_PASSWORD).createIceServer());
+        iceServers.add(PeerConnection.IceServer.builder("turns:standard.relay.metered.ca:443?transport=tcp").setUsername(TURN_USERNAME).setPassword(TURN_PASSWORD).createIceServer());
+        iceServers.add(PeerConnection.IceServer.builder("turn:global.relay.metered.ca:80").setUsername(TURN_USERNAME).setPassword(TURN_PASSWORD).createIceServer());
+        iceServers.add(PeerConnection.IceServer.builder("turn:global.relay.metered.ca:443").setUsername(TURN_USERNAME).setPassword(TURN_PASSWORD).createIceServer());
 
         PeerConnection.RTCConfiguration rtcConfig = new PeerConnection.RTCConfiguration(iceServers);
         rtcConfig.sdpSemantics = PeerConnection.SdpSemantics.UNIFIED_PLAN;
@@ -173,22 +165,17 @@ public class WebRTCManager {
 
         peerConnection = factory.createPeerConnection(rtcConfig, new PeerConnection.Observer() {
             @Override public void onIceCandidate(IceCandidate candidate) { callback.onIceCandidateGenerated(candidate); }
-
-            @Override
-            public void onTrack(RtpTransceiver transceiver) {
+            @Override public void onTrack(RtpTransceiver transceiver) {
                 MediaStreamTrack track = transceiver.getReceiver().track();
                 if (track instanceof VideoTrack) callback.onRemoteStreamAdded((VideoTrack) track);
             }
-
-            @Override
-            public void onIceConnectionChange(PeerConnection.IceConnectionState newState) {
+            @Override public void onIceConnectionChange(PeerConnection.IceConnectionState newState) {
                 if (newState == PeerConnection.IceConnectionState.CONNECTED || newState == PeerConnection.IceConnectionState.COMPLETED) {
                     callback.onConnectionStateChanged(PeerConnection.PeerConnectionState.CONNECTED);
                 } else if (newState == PeerConnection.IceConnectionState.FAILED) {
                     callback.onConnectionStateChanged(PeerConnection.PeerConnectionState.FAILED);
                 }
             }
-
             @Override public void onConnectionChange(PeerConnection.PeerConnectionState newState) { callback.onConnectionStateChanged(newState); }
             @Override public void onSignalingChange(PeerConnection.SignalingState s) {}
             @Override public void onIceConnectionReceivingChange(boolean b) {}
@@ -204,7 +191,19 @@ public class WebRTCManager {
         if (peerConnection != null) {
             List<String> streamIds = Collections.singletonList("ARDAMS");
             if (localAudioTrack != null) peerConnection.addTrack(localAudioTrack, streamIds);
-            if (localVideoTrack != null) peerConnection.addTrack(localVideoTrack, streamIds);
+            if (localVideoTrack != null) {
+                RtpSender videoSender = peerConnection.addTrack(localVideoTrack, streamIds);
+                if (videoSender != null) {
+                    RtpParameters params = videoSender.getParameters();
+                    for (RtpParameters.Encoding enc : params.encodings) {
+                        enc.maxBitrateBps = 2_000_000;
+                        enc.minBitrateBps = 500_000;
+                        enc.maxFramerate = 30;
+                    }
+                    params.degradationPreference = RtpParameters.DegradationPreference.MAINTAIN_RESOLUTION;
+                    videoSender.setParameters(params);
+                }
+            }
         }
     }
 
@@ -271,11 +270,8 @@ public class WebRTCManager {
     public void switchCamera() {
         if (videoCapturer != null) {
             videoCapturer.switchCamera(new CameraVideoCapturer.CameraSwitchHandler() {
-                @Override
-                public void onCameraSwitchDone(boolean isFrontCamera) {
-                    if (localViewRef != null) {
-                        localViewRef.post(() -> localViewRef.setMirror(isFrontCamera));
-                    }
+                @Override public void onCameraSwitchDone(boolean isFrontCamera) {
+                    if (localViewRef != null) localViewRef.post(() -> localViewRef.setMirror(isFrontCamera));
                 }
                 @Override public void onCameraSwitchError(String s) {}
             });
