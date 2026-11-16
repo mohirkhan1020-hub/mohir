@@ -70,7 +70,7 @@ public class MainActivity extends AppCompatActivity {
     private FirebaseFirestore db;
     private String myPhone, myName, myAbout, myAvatarBase64;
 
-    private TextView tvAppTitle, tvCallerName, tvCallType, chipAll, chipOnline, chipGroups;
+    private TextView tvAppTitle, tvCallerName, tvCallType, chipAll, chipOnline, tvEmptyChats;
     private TextView tvStoryTextFull, tvStoryAuthor, tvStoryTime;
     private EditText etSearch;
     private BottomNavigationView bottomNav;
@@ -102,7 +102,11 @@ public class MainActivity extends AppCompatActivity {
     private Runnable storyRunnable;
 
     private final ActivityResultLauncher<String[]> permLauncher =
-            registerForActivityResult(new ActivityResultContracts.RequestMultiplePermissions(), r -> {});
+            registerForActivityResult(new ActivityResultContracts.RequestMultiplePermissions(), r -> {
+                if (myPhone != null && !myPhone.isEmpty()) {
+                    ContextCompat.startForegroundService(this, new Intent(this, WhatsAppBgService.class));
+                }
+            });
 
     private final ActivityResultLauncher<String> imagePickerLauncher =
             registerForActivityResult(new ActivityResultContracts.GetContent(), uri -> {
@@ -192,6 +196,18 @@ public class MainActivity extends AppCompatActivity {
                 } catch (Exception ignored) {}
             }
         }
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE && !prefs.getBoolean("fsi_asked", false)) {
+            NotificationManager nm = getSystemService(NotificationManager.class);
+            if (nm != null && !nm.canUseFullScreenIntent()) {
+                prefs.edit().putBoolean("fsi_asked", true).apply();
+                try {
+                    Intent i = new Intent(Settings.ACTION_MANAGE_APP_USE_FULL_SCREEN_INTENT);
+                    i.setData(Uri.parse("package:" + getPackageName()));
+                    startActivity(i);
+                } catch (Exception ignored) {}
+            }
+        }
     }
 
     private void initViews() {
@@ -201,6 +217,7 @@ public class MainActivity extends AppCompatActivity {
         chatsContainer = findViewById(R.id.chatsContainer);
         statusContainer = findViewById(R.id.statusContainer);
         rvChats = findViewById(R.id.rvChats);
+        tvEmptyChats = findViewById(R.id.tvEmptyChats);
         rvStatuses = findViewById(R.id.rvStatuses);
         rvCalls = findViewById(R.id.rvCalls);
         fabAction = findViewById(R.id.fabAction);
@@ -208,8 +225,6 @@ public class MainActivity extends AppCompatActivity {
 
         chipAll = findViewById(R.id.chipAll);
         chipOnline = findViewById(R.id.chipOnline);
-        chipGroups = findViewById(R.id.chipGroups);
-        chipGroups.setVisibility(View.GONE);
 
         incomingOverlay = findViewById(R.id.incomingOverlay);
         tvCallerName = findViewById(R.id.tvCallerName);
@@ -422,6 +437,7 @@ public class MainActivity extends AppCompatActivity {
         }
         Collections.sort(filteredUsers, (a, b) -> Long.compare(b.getLastMsgTime(), a.getLastMsgTime()));
         userAdapter.notifyDataSetChanged();
+        tvEmptyChats.setVisibility(filteredUsers.isEmpty() ? View.VISIBLE : View.GONE);
     }
 
     private void showFindUserByPhoneDialog() {
@@ -436,14 +452,8 @@ public class MainActivity extends AppCompatActivity {
                 .setView(etPhone)
                 .setPositiveButton("Search & Chat", (d, w) -> {
                     String entered = LoginActivity.normalizePhone(etPhone.getText().toString());
-                    if (entered.length() < 7) {
-                        Toast.makeText(this, "সঠিক নম্বর লিখুন", Toast.LENGTH_SHORT).show();
-                        return;
-                    }
-                    if (entered.equals(myPhone)) {
-                        Toast.makeText(this, "এটি আপনার নিজের নম্বর!", Toast.LENGTH_SHORT).show();
-                        return;
-                    }
+                    if (entered.length() < 7) { Toast.makeText(this, "সঠিক নম্বর লিখুন", Toast.LENGTH_SHORT).show(); return; }
+                    if (entered.equals(myPhone)) { Toast.makeText(this, "এটি আপনার নিজের নম্বর!", Toast.LENGTH_SHORT).show(); return; }
                     searchUserInFirestore(entered);
                 })
                 .setNegativeButton("Cancel", null)
@@ -461,11 +471,8 @@ public class MainActivity extends AppCompatActivity {
                         .addOnSuccessListener(snaps -> {
                             if (!snaps.isEmpty()) {
                                 DocumentSnapshot found = snaps.getDocuments().get(0);
-                                if (myPhone.equals(found.getId())) {
-                                    Toast.makeText(this, "এটি আপনার নিজের নম্বর!", Toast.LENGTH_SHORT).show();
-                                } else {
-                                    onFriendFound(found);
-                                }
+                                if (myPhone.equals(found.getId())) Toast.makeText(this, "এটি আপনার নিজের নম্বর!", Toast.LENGTH_SHORT).show();
+                                else onFriendFound(found);
                             } else {
                                 Toast.makeText(this, "এই নম্বরে কোনো WhatsApp অ্যাকাউন্ট পাওয়া যায়নি", Toast.LENGTH_LONG).show();
                             }
@@ -542,11 +549,8 @@ public class MainActivity extends AppCompatActivity {
                     for (DocumentSnapshot d : snaps.getDocuments()) {
                         String status = d.getString("status");
                         Long createdAt = d.getLong("createdAt");
-                        boolean isFresh = createdAt == null || (System.currentTimeMillis() - createdAt) < 60000;
-                        if ("calling".equals(status) && isFresh) {
-                            foundCall = d;
-                            break;
-                        }
+                        boolean isFresh = createdAt == null || Math.abs(System.currentTimeMillis() - createdAt) < 180000;
+                        if ("calling".equals(status) && isFresh) { foundCall = d; break; }
                     }
                     if (foundCall != null) {
                         DocumentSnapshot callDoc = foundCall;
