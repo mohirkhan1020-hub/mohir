@@ -62,6 +62,7 @@ public class WebRTCManager {
     private VideoTrack localVideoTrack;
     private CameraVideoCapturer videoCapturer;
     private SurfaceTextureHelper surfaceTextureHelper;
+    private SurfaceViewRenderer localViewRef;
 
     private boolean isVideoCall = true;
     private boolean isRemoteSdpSet = false;
@@ -91,6 +92,7 @@ public class WebRTCManager {
 
     public void startLocalMedia(boolean isVideo, SurfaceViewRenderer localView) {
         this.isVideoCall = isVideo;
+        this.localViewRef = localView;
 
         MediaConstraints audioConstraints = new MediaConstraints();
         audioConstraints.mandatory.add(new MediaConstraints.KeyValuePair("googEchoCancellation", "true"));
@@ -108,11 +110,12 @@ public class WebRTCManager {
                 videoSource = factory.createVideoSource(videoCapturer.isScreencast());
                 videoCapturer.initialize(surfaceTextureHelper, context, videoSource.getCapturerObserver());
                 try {
-                    videoCapturer.startCapture(640, 480, 30);
+                    videoCapturer.startCapture(1280, 720, 30);
                 } catch (Exception e) {
                     callback.onError("Camera error: " + e.getMessage());
                 }
 
+                localView.setMirror(true);
                 localVideoTrack = factory.createVideoTrack("ARDAMSv0", videoSource);
                 localVideoTrack.setEnabled(true);
                 localVideoTrack.addSink(localView);
@@ -151,7 +154,6 @@ public class WebRTCManager {
         iceServers.add(PeerConnection.IceServer.builder("stun:stun1.l.google.com:19302").createIceServer());
         iceServers.add(PeerConnection.IceServer.builder("stun:stun.relay.metered.ca:80").createIceServer());
 
-        // Metered TURN Servers (Free & Global)
         iceServers.add(PeerConnection.IceServer.builder("turn:standard.relay.metered.ca:80")
                 .setUsername(TURN_USERNAME).setPassword(TURN_PASSWORD).createIceServer());
         iceServers.add(PeerConnection.IceServer.builder("turn:standard.relay.metered.ca:80?transport=tcp")
@@ -265,7 +267,20 @@ public class WebRTCManager {
 
     public void setMicEnabled(boolean enabled) { if (localAudioTrack != null) localAudioTrack.setEnabled(enabled); }
     public void setCamEnabled(boolean enabled) { if (localVideoTrack != null) localVideoTrack.setEnabled(enabled); }
-    public void switchCamera() { if (videoCapturer != null) videoCapturer.switchCamera(null); }
+
+    public void switchCamera() {
+        if (videoCapturer != null) {
+            videoCapturer.switchCamera(new CameraVideoCapturer.CameraSwitchHandler() {
+                @Override
+                public void onCameraSwitchDone(boolean isFrontCamera) {
+                    if (localViewRef != null) {
+                        localViewRef.post(() -> localViewRef.setMirror(isFrontCamera));
+                    }
+                }
+                @Override public void onCameraSwitchError(String s) {}
+            });
+        }
+    }
 
     public void endCall() {
         synchronized (iceLock) { isRemoteSdpSet = false; pendingIceCandidates.clear(); }
@@ -277,7 +292,7 @@ public class WebRTCManager {
         if (videoSource != null) { videoSource.dispose(); videoSource = null; }
         if (audioSource != null) { audioSource.dispose(); audioSource = null; }
         if (peerConnection != null) { peerConnection.close(); peerConnection = null; }
-        localAudioTrack = null; localVideoTrack = null;
+        localAudioTrack = null; localVideoTrack = null; localViewRef = null;
     }
 
     public void destroyFactory() {
