@@ -32,32 +32,81 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.MaterialComponents.DayNight.NoActionBar">
 
-        <activity android:name=".LoginActivity" android:exported="true" android:windowSoftInputMode="adjustResize">
+        <activity
+            android:name=".LoginActivity"
+            android:exported="true"
+            android:windowSoftInputMode="adjustResize">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
 
-        <activity android:name=".MainActivity" android:exported="false"
+        <activity
+            android:name=".MainActivity"
+            android:exported="false"
             android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden"
             android:windowSoftInputMode="adjustResize" />
 
-        <activity android:name=".ChatActivity" android:exported="false"
+        <activity
+            android:name=".ChatActivity"
+            android:exported="false"
             android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden"
-            android:showWhenLocked="true" android:turnScreenOn="true"
+            android:showWhenLocked="true"
+            android:turnScreenOn="true"
             android:windowSoftInputMode="adjustResize" />
 
-        <service android:name=".WhatsAppBgService" android:enabled="true" android:exported="false" android:foregroundServiceType="remoteMessaging" />
-        <service android:name=".ScreenShareService" android:enabled="true" android:exported="false" android:foregroundServiceType="mediaProjection" />
-        <service android:name=".ActiveCallService" android:enabled="true" android:exported="false" android:foregroundServiceType="microphone" />
+        <activity
+            android:name=".DoodleActivity"
+            android:exported="false"
+            android:theme="@style/Theme.MaterialComponents.DayNight.NoActionBar" />
 
-        <receiver android:name=".BootReceiver" android:enabled="true" android:exported="true">
-            <intent-filter><action android:name="android.intent.action.BOOT_COMPLETED" /></intent-filter>
+        <activity
+            android:name=".StarredMessagesActivity"
+            android:exported="false"
+            android:theme="@style/Theme.MaterialComponents.DayNight.NoActionBar" />
+
+        <activity
+            android:name=".GroupInfoActivity"
+            android:exported="false"
+            android:theme="@style/Theme.MaterialComponents.DayNight.NoActionBar" />
+
+        <service
+            android:name=".WhatsAppBgService"
+            android:enabled="true"
+            android:exported="false"
+            android:foregroundServiceType="remoteMessaging" />
+
+        <service
+            android:name=".ScreenShareService"
+            android:enabled="true"
+            android:exported="false"
+            android:foregroundServiceType="mediaProjection" />
+
+        <service
+            android:name=".ActiveCallService"
+            android:enabled="true"
+            android:exported="false"
+            android:foregroundServiceType="microphone" />
+
+        <receiver
+            android:name=".BootReceiver"
+            android:enabled="true"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+            </intent-filter>
         </receiver>
 
-        <provider android:name="androidx.core.content.FileProvider" android:authorities="${applicationId}.fileprovider" android:exported="false" android:grantUriPermissions="true">
-            <meta-data android:name="android.support.FILE_PROVIDER_PATHS" android:resource="@xml/file_paths" />
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
         </provider>
+
     </application>
 </manifest>
