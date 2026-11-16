@@ -18,11 +18,23 @@
                 <TextView android:id="@+id/tvChatName" android:layout_width="wrap_content" android:layout_height="wrap_content" android:ellipsize="end" android:maxLines="1" android:text="Friend" android:textColor="#E9EDEF" android:textSize="16.5sp" android:textStyle="bold" />
                 <TextView android:id="@+id/tvChatStatus" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="online" android:textColor="#25D366" android:textSize="12sp" />
             </LinearLayout>
-            <ImageButton android:id="@+id/btnVideoCall" android:layout_width="42dp" android:layout_height="42dp" android:background="?attr/selectableItemBackgroundBorderless" android:src="@drawable/ic_videocam" />
-            <ImageButton android:id="@+id/btnAudioCall" android:layout_width="42dp" android:layout_height="42dp" android:background="?attr/selectableItemBackgroundBorderless" android:src="@drawable/ic_calls" />
+            <ImageButton android:id="@+id/btnVideoCall" android:layout_width="40dp" android:layout_height="40dp" android:background="?attr/selectableItemBackgroundBorderless" android:src="@drawable/ic_videocam" />
+            <ImageButton android:id="@+id/btnAudioCall" android:layout_width="40dp" android:layout_height="40dp" android:background="?attr/selectableItemBackgroundBorderless" android:src="@drawable/ic_calls" />
+            <ImageButton android:id="@+id/btnChatMore" android:layout_width="38dp" android:layout_height="38dp" android:background="?attr/selectableItemBackgroundBorderless" android:src="@drawable/ic_more" />
         </LinearLayout>
 
-        <androidx.recyclerview.widget.RecyclerView android:id="@+id/rvMessages" android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1" android:paddingVertical="8dp" />
+        <!-- In-Chat Search Bar -->
+        <LinearLayout android:id="@+id/chatSearchBar" android:layout_width="match_parent" android:layout_height="48dp" android:background="#182229" android:gravity="center_vertical" android:paddingHorizontal="12dp" android:visibility="gone">
+            <EditText android:id="@+id/etChatSearch" android:layout_width="0dp" android:layout_height="36dp" android:layout_weight="1" android:background="@drawable/bg_wa_input" android:hint="Search messages..." android:paddingHorizontal="14dp" android:textColor="#E9EDEF" android:textColorHint="#8696A0" android:textSize="14sp" />
+            <ImageButton android:id="@+id/btnCloseChatSearch" android:layout_width="36dp" android:layout_height="36dp" android:layout_marginStart="6dp" android:background="?attr/selectableItemBackgroundBorderless" android:src="@drawable/ic_close" />
+        </LinearLayout>
+
+        <FrameLayout android:id="@+id/chatWallContainer" android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1">
+            <ImageView android:id="@+id/ivChatWallpaper" android:layout_width="match_parent" android:layout_height="match_parent" android:scaleType="centerCrop" android:alpha="0.45" android:visibility="gone" />
+            <androidx.recyclerview.widget.RecyclerView android:id="@+id/rvMessages" android:layout_width="match_parent" android:layout_height="match_parent" android:paddingVertical="8dp" />
+        </FrameLayout>
+
+        <TextView android:id="@+id/blockedBanner" android:layout_width="match_parent" android:layout_height="44dp" android:background="#1F2C34" android:gravity="center" android:text="You blocked this contact. Tap to unblock." android:textColor="#EF4444" android:textSize="13.5sp" android:textStyle="bold" android:visibility="gone" />
 
         <LinearLayout android:id="@+id/replyPreviewLayout" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginHorizontal="8dp" android:background="@drawable/bg_wa_reply_bar" android:gravity="center_vertical" android:paddingStart="12dp" android:paddingEnd="8dp" android:paddingVertical="8dp" android:visibility="gone">
             <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:orientation="vertical">
@@ -49,23 +61,13 @@
         </LinearLayout>
     </LinearLayout>
 
-    <!-- আসল WhatsApp ইনকামিং কল স্ক্রিন -->
     <FrameLayout android:id="@+id/incomingOverlay" android:layout_width="match_parent" android:layout_height="match_parent" android:background="@drawable/bg_wa_call_bg" android:visibility="gone">
         <LinearLayout android:layout_width="match_parent" android:layout_height="match_parent" android:gravity="center_horizontal" android:orientation="vertical" android:paddingTop="84dp">
             <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="🔒 End-to-end encrypted" android:textColor="#8696A0" android:textSize="12sp" />
             <TextView android:id="@+id/tvCallerName" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="12dp" android:textColor="#FFFFFF" android:textSize="28sp" android:textStyle="bold" />
             <TextView android:id="@+id/tvCallType" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="6dp" android:text="WhatsApp voice call" android:textColor="#25D366" android:textSize="14.5sp" />
-
-            <ImageView
-                android:layout_width="136dp"
-                android:layout_height="136dp"
-                android:layout_marginTop="52dp"
-                android:background="@drawable/bg_wa_circle_gray"
-                android:padding="32dp"
-                android:src="@drawable/ic_person" />
-
+            <ImageView android:layout_width="136dp" android:layout_height="136dp" android:layout_marginTop="52dp" android:background="@drawable/bg_wa_circle_gray" android:padding="32dp" android:src="@drawable/ic_person" />
             <View android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1" />
-
             <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginBottom="56dp" android:gravity="center">
                 <LinearLayout android:layout_width="wrap_content" android:layout_height="wrap_content" android:gravity="center" android:orientation="vertical">
                     <ImageButton android:id="@+id/btnRejectCall" android:layout_width="68dp" android:layout_height="68dp" android:background="@drawable/bg_wa_circle_green" android:backgroundTint="#EF4444" android:src="@drawable/ic_call_end" />
@@ -79,22 +81,13 @@
         </LinearLayout>
     </FrameLayout>
 
-    <!-- আসল WhatsApp ভিডিও/অডিও কল স্ক্রিন -->
     <FrameLayout android:id="@+id/callOverlay" android:layout_width="match_parent" android:layout_height="match_parent" android:background="@drawable/bg_wa_call_bg" android:visibility="gone">
         <org.webrtc.SurfaceViewRenderer android:id="@+id/remoteVideoView" android:layout_width="match_parent" android:layout_height="match_parent" />
-
         <LinearLayout android:id="@+id/audioCallAvatarBox" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_gravity="center" android:gravity="center" android:orientation="vertical" android:visibility="gone">
-            <ImageView
-                android:layout_width="144dp"
-                android:layout_height="144dp"
-                android:background="@drawable/bg_wa_circle_gray"
-                android:padding="34dp"
-                android:src="@drawable/ic_person" />
+            <ImageView android:layout_width="144dp" android:layout_height="144dp" android:background="@drawable/bg_wa_circle_gray" android:padding="34dp" android:src="@drawable/ic_person" />
         </LinearLayout>
-
         <org.webrtc.SurfaceViewRenderer android:id="@+id/localVideoView" android:layout_width="match_parent" android:layout_height="match_parent" />
 
-        <!-- স্মুথ গ্রেডিয়েন্ট টপ বার -->
         <LinearLayout android:id="@+id/callTopBar" android:layout_width="match_parent" android:layout_height="96dp" android:background="@drawable/bg_wa_top_gradient" android:gravity="center_vertical" android:paddingHorizontal="16dp">
             <ImageButton android:id="@+id/btnMinimize" android:layout_width="42dp" android:layout_height="42dp" android:background="?attr/selectableItemBackgroundBorderless" android:src="@drawable/ic_minimize" />
             <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:gravity="center" android:orientation="vertical">
@@ -107,30 +100,9 @@
 
         <ImageButton android:id="@+id/btnMaximize" android:layout_width="36dp" android:layout_height="36dp" android:layout_gravity="top|end" android:layout_margin="8dp" android:background="@drawable/bg_wa_circle_gray" android:src="@drawable/ic_minimize" android:visibility="gone" />
 
-        <!-- WhatsApp-এর আসল Bottom Control Sheet -->
-        <LinearLayout
-            android:id="@+id/callBottomBar"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_gravity="bottom"
-            android:background="@drawable/bg_wa_call_bottom_sheet"
-            android:gravity="center_horizontal"
-            android:orientation="vertical"
-            android:paddingTop="10dp"
-            android:paddingBottom="26dp">
-
-            <View
-                android:layout_width="36dp"
-                android:layout_height="4dp"
-                android:layout_marginBottom="16dp"
-                android:background="@drawable/bg_wa_handle" />
-
-            <LinearLayout
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:gravity="center"
-                android:paddingHorizontal="12dp">
-
+        <LinearLayout android:id="@+id/callBottomBar" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_gravity="bottom" android:background="@drawable/bg_wa_call_bottom_sheet" android:gravity="center_horizontal" android:orientation="vertical" android:paddingTop="10dp" android:paddingBottom="26dp">
+            <View android:layout_width="36dp" android:layout_height="4dp" android:layout_marginBottom="16dp" android:background="@drawable/bg_wa_handle" />
+            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center" android:paddingHorizontal="12dp">
                 <ImageButton android:id="@+id/btnSpeaker" android:layout_width="48dp" android:layout_height="48dp" android:background="@drawable/bg_wa_circle_gray" android:src="@drawable/ic_volume" />
                 <ImageButton android:id="@+id/btnCam" android:layout_width="48dp" android:layout_height="48dp" android:layout_marginStart="12dp" android:background="@drawable/bg_wa_circle_gray" android:src="@drawable/ic_videocam" />
                 <ImageButton android:id="@+id/btnSwitchCam" android:layout_width="48dp" android:layout_height="48dp" android:layout_marginStart="12dp" android:background="@drawable/bg_wa_circle_gray" android:src="@drawable/ic_flip_cam" />
