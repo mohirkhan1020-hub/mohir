@@ -5,6 +5,8 @@ public class UserModel {
     private boolean online, globalRoom;
     private long lastSeen, lastMsgTime;
     private int unreadCount;
+    private boolean pinned;
+    private long mutedUntil;
 
     public UserModel() {}
 
@@ -40,4 +42,10 @@ public class UserModel {
 
     public int getUnreadCount() { return unreadCount; }
     public void setUnreadCount(int unreadCount) { this.unreadCount = unreadCount; }
+
+    public boolean isPinned() { return pinned; }
+    public void setPinned(boolean pinned) { this.pinned = pinned; }
+
+    public long getMutedUntil() { return mutedUntil; }
+    public void setMutedUntil(long mutedUntil) { this.mutedUntil = mutedUntil; }
 }
