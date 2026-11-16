@@ -1,19 +1,22 @@
 package com.wevlo.amohir;
 
 import android.Manifest;
+import android.annotation.SuppressLint;
 import android.app.AlertDialog;
+import android.app.NotificationManager;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.Color;
-import android.media.Ringtone;
-import android.media.RingtoneManager;
 import android.net.Uri;
+import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
+import android.os.PowerManager;
+import android.provider.Settings;
 import android.text.Editable;
 import android.text.InputType;
 import android.text.TextWatcher;
@@ -94,7 +97,6 @@ public class MainActivity extends AppCompatActivity {
     private String currentFilter = "all";
     private boolean isPickingAvatar = false;
     private Uri cameraStatusUri;
-    private Ringtone ringtone;
     private final Handler storyHandler = new Handler(Looper.getMainLooper());
     private Runnable storyRunnable;
 
@@ -141,6 +143,7 @@ public class MainActivity extends AppCompatActivity {
         setContentView(R.layout.activity_main);
         initFirebase();
         initViews();
+        askRequiredPermissionsAndStartService();
         initSession();
     }
 
@@ -159,6 +162,37 @@ public class MainActivity extends AppCompatActivity {
         db = FirebaseFirestore.getInstance();
     }
 
+    @SuppressLint("BatteryLife")
+    private void askRequiredPermissionsAndStartService() {
+        List<String> perms = new ArrayList<>();
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU
+                && ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+            perms.add(Manifest.permission.POST_NOTIFICATIONS);
+        }
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
+            perms.add(Manifest.permission.CAMERA);
+        }
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+            perms.add(Manifest.permission.RECORD_AUDIO);
+        }
+        if (!perms.isEmpty()) permLauncher.launch(perms.toArray(new String[0]));
+
+        ContextCompat.startForegroundService(this, new Intent(this, WhatsAppBgService.class));
+
+        SharedPreferences prefs = getSharedPreferences("DivineWA", MODE_PRIVATE);
+        if (!prefs.getBoolean("battery_asked", false)) {
+            PowerManager pm = (PowerManager) getSystemService(POWER_SERVICE);
+            if (pm != null && !pm.isIgnoringBatteryOptimizations(getPackageName())) {
+                prefs.edit().putBoolean("battery_asked", true).apply();
+                try {
+                    Intent i = new Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS);
+                    i.setData(Uri.parse("package:" + getPackageName()));
+                    startActivity(i);
+                } catch (Exception ignored) {}
+            }
+        }
+    }
+
     private void initViews() {
         tvAppTitle = findViewById(R.id.tvAppTitle);
         etSearch = findViewById(R.id.etSearch);
@@ -174,7 +208,7 @@ public class MainActivity extends AppCompatActivity {
         chipAll = findViewById(R.id.chipAll);
         chipOnline = findViewById(R.id.chipOnline);
         chipGroups = findViewById(R.id.chipGroups);
-        chipGroups.setVisibility(View.GONE); // শুধুমাত্র প্রাইভেট চ্যাট
+        chipGroups.setVisibility(View.GONE);
 
         incomingOverlay = findViewById(R.id.incomingOverlay);
         tvCallerName = findViewById(R.id.tvCallerName);
@@ -246,11 +280,8 @@ public class MainActivity extends AppCompatActivity {
         statusViewerOverlay.setOnClickListener(v -> closeFullscreenStory());
 
         fabAction.setOnClickListener(v -> {
-            if (bottomNav.getSelectedItemId() == R.id.nav_updates) {
-                showAddStatusDialog();
-            } else {
-                showFindUserByPhoneDialog();
-            }
+            if (bottomNav.getSelectedItemId() == R.id.nav_updates) showAddStatusDialog();
+            else showFindUserByPhoneDialog();
         });
     }
 
@@ -314,14 +345,11 @@ public class MainActivity extends AppCompatActivity {
         db.collection("users").document(myPhone).set(map, SetOptions.merge());
     }
 
-    /* 🔒 শুধুমাত্র আপনার সেভ করা কন্টাক্ট এবং চ্যাট লোড হবে */
     private void listenPrivateContacts() {
         db.collection("users").document(myPhone).collection("contacts")
                 .addSnapshotListener((snaps, err) -> {
                     if (snaps == null) return;
-                    for (DocumentSnapshot d : snaps.getDocuments()) {
-                        attachPeerListener(d.getId());
-                    }
+                    for (DocumentSnapshot d : snaps.getDocuments()) attachPeerListener(d.getId());
                 });
     }
 
@@ -334,9 +362,7 @@ public class MainActivity extends AppCompatActivity {
                         List<String> parts = (List<String>) d.get("participants");
                         if (parts == null) continue;
                         String otherPhone = null;
-                        for (String p : parts) {
-                            if (!myPhone.equals(p)) { otherPhone = p; break; }
-                        }
+                        for (String p : parts) if (!myPhone.equals(p)) { otherPhone = p; break; }
                         if (otherPhone != null) {
                             String lm = d.getString("lastMessage");
                             Long lt = d.getLong("lastTimestamp");
@@ -383,7 +409,6 @@ public class MainActivity extends AppCompatActivity {
         userAdapter.notifyDataSetChanged();
     }
 
-    /* 🔍 মোবাইল নম্বর দিয়ে প্রাইভেট ইউজার খোঁজা */
     private void showFindUserByPhoneDialog() {
         EditText etPhone = new EditText(this);
         etPhone.setHint("Enter friend's mobile number");
@@ -450,7 +475,6 @@ public class MainActivity extends AppCompatActivity {
 
     private void openPrivateChat(String peerPhone, String peerName, String peerAvatar) {
         Intent i = new Intent(MainActivity.this, ChatActivity.class);
-        i.putExtra("isGlobal", false);
         i.putExtra("peerUid", peerPhone);
         i.putExtra("peerName", peerName);
         i.putExtra("peerAvatar", peerAvatar);
@@ -495,7 +519,6 @@ public class MainActivity extends AppCompatActivity {
         db.collection("calls").whereEqualTo("receiverId", myPhone)
                 .addSnapshotListener((snaps, err) -> {
                     if (snaps == null || ChatActivity.isChatOpen) {
-                        stopRingtone();
                         incomingOverlay.setVisibility(View.GONE);
                         return;
                     }
@@ -516,28 +539,30 @@ public class MainActivity extends AppCompatActivity {
                         String ctype = callDoc.getString("type");
                         tvCallerName.setText(cname != null ? cname : callDoc.getString("callerId"));
                         tvCallType.setText("video".equals(ctype) ? "WhatsApp video call" : "WhatsApp voice call");
-                        playRingtone();
 
                         findViewById(R.id.btnRejectCall).setOnClickListener(v -> {
-                            stopRingtone();
                             incomingOverlay.setVisibility(View.GONE);
+                            cancelCallNotification();
                             callDoc.getReference().update("status", "ended");
                         });
                         findViewById(R.id.btnAcceptCall).setOnClickListener(v -> {
-                            stopRingtone();
                             incomingOverlay.setVisibility(View.GONE);
+                            cancelCallNotification();
                             Intent i = new Intent(MainActivity.this, ChatActivity.class);
-                            i.putExtra("isGlobal", false);
                             i.putExtra("peerUid", callDoc.getString("callerId"));
                             i.putExtra("peerName", cname);
                             i.putExtra("autoAcceptCallId", callDoc.getId());
                             startActivity(i);
                         });
                     } else {
-                        stopRingtone();
                         incomingOverlay.setVisibility(View.GONE);
                     }
                 });
+    }
+
+    private void cancelCallNotification() {
+        NotificationManager nm = getSystemService(NotificationManager.class);
+        if (nm != null) nm.cancel(2002);
     }
 
     private void showMainMenuDialog() {
@@ -550,23 +575,13 @@ public class MainActivity extends AppCompatActivity {
             if (which == 0) showFindUserByPhoneDialog();
             else if (which == 1) showProfileSettingsDialog();
             else {
+                stopService(new Intent(this, WhatsAppBgService.class));
                 db.collection("users").document(myPhone).update("online", false, "lastSeen", System.currentTimeMillis());
                 getSharedPreferences("DivineWA", MODE_PRIVATE).edit().clear().apply();
                 startActivity(new Intent(this, LoginActivity.class));
                 finish();
             }
         }).show();
-    }
-
-    private void playRingtone() {
-        try {
-            if (ringtone == null) ringtone = RingtoneManager.getRingtone(this, RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE));
-            if (ringtone != null && !ringtone.isPlaying()) ringtone.play();
-        } catch (Exception ignored) {}
-    }
-
-    private void stopRingtone() {
-        try { if (ringtone != null && ringtone.isPlaying()) ringtone.stop(); } catch (Exception ignored) {}
     }
 
     private void openFullscreenStory(StatusModel s) {
@@ -688,7 +703,6 @@ public class MainActivity extends AppCompatActivity {
 
     @Override protected void onPause() {
         super.onPause();
-        stopRingtone();
         if (myPhone != null && !myPhone.isEmpty()) {
             db.collection("users").document(myPhone).update("online", false, "lastSeen", System.currentTimeMillis());
         }
@@ -696,7 +710,6 @@ public class MainActivity extends AppCompatActivity {
 
     @Override protected void onDestroy() {
         super.onDestroy();
-        stopRingtone();
         if (storyRunnable != null) storyHandler.removeCallbacks(storyRunnable);
         for (ListenerRegistration r : peerListeners.values()) r.remove();
     }
