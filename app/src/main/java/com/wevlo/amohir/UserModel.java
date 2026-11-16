@@ -4,6 +4,7 @@ public class UserModel {
     private String uid, name, about, avatarBase64, typingTo, lastMessage;
     private boolean online, globalRoom;
     private long lastSeen, lastMsgTime;
+    private int unreadCount;
 
     public UserModel() {}
 
@@ -36,4 +37,7 @@ public class UserModel {
 
     public long getLastMsgTime() { return lastMsgTime; }
     public void setLastMsgTime(long lastMsgTime) { this.lastMsgTime = lastMsgTime; }
+
+    public int getUnreadCount() { return unreadCount; }
+    public void setUnreadCount(int unreadCount) { this.unreadCount = unreadCount; }
 }
