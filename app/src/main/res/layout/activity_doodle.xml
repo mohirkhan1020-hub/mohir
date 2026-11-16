@@ -1,1 +1,44 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="#000000">
 
+    <ImageView
+        android:id="@+id/ivBasePhoto"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:scaleType="fitCenter" />
+
+    <com.wevlo.amohir.DoodleView
+        android:id="@+id/doodleView"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent" />
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="56dp"
+        android:background="#80000000"
+        android:gravity="center_vertical"
+        android:paddingHorizontal="16dp">
+        <ImageButton android:id="@+id/btnCloseDoodle" android:layout_width="40dp" android:layout_height="40dp" android:background="?attr/selectableItemBackgroundBorderless" android:src="@drawable/ic_close" />
+        <View android:layout_width="0dp" android:layout_height="1dp" android:layout_weight="1" />
+        <ImageButton android:id="@+id/btnUndo" android:layout_width="40dp" android:layout_height="40dp" android:background="?attr/selectableItemBackgroundBorderless" android:src="@drawable/ic_back" />
+        <ImageButton android:id="@+id/btnDoneDoodle" android:layout_width="40dp" android:layout_height="40dp" android:layout_marginStart="12dp" android:background="?attr/selectableItemBackgroundBorderless" android:src="@drawable/ic_send" />
+    </LinearLayout>
+
+    <LinearLayout
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="bottom|center_horizontal"
+        android:layout_marginBottom="24dp"
+        android:background="@drawable/bg_wa_reply_bar"
+        android:orientation="horizontal"
+        android:padding="8dp">
+        <View android:id="@+id/colorRed" android:layout_width="32dp" android:layout_height="32dp" android:layout_margin="4dp" android:background="#EF4444" />
+        <View android:id="@+id/colorGreen" android:layout_width="32dp" android:layout_height="32dp" android:layout_margin="4dp" android:background="#25D366" />
+        <View android:id="@+id/colorBlue" android:layout_width="32dp" android:layout_height="32dp" android:layout_margin="4dp" android:background="#3B82F6" />
+        <View android:id="@+id/colorYellow" android:layout_width="32dp" android:layout_height="32dp" android:layout_margin="4dp" android:background="#FACC15" />
+        <View android:id="@+id/colorWhite" android:layout_width="32dp" android:layout_height="32dp" android:layout_margin="4dp" android:background="#FFFFFF" />
+    </LinearLayout>
+</FrameLayout>
