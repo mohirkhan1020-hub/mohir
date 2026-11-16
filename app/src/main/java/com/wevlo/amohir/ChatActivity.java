@@ -14,6 +14,8 @@ import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.Color;
 import android.graphics.Outline;
+import android.media.AudioDeviceCallback;
+import android.media.AudioDeviceInfo;
 import android.media.AudioManager;
 import android.media.MediaRecorder;
 import android.media.Ringtone;
@@ -118,10 +120,11 @@ public class ChatActivity extends AppCompatActivity {
     private EglBase eglBase;
     private WebRTCManager webRTCManager;
     private AudioManager audioManager;
+    private AudioDeviceCallback audioDeviceCallback;
     private Ringtone ringtone;
 
     private String activeCallType = "video";
-    private boolean isMuted = false, isCamOff = false, isSpeakerOn = true;
+    private boolean isMuted = false, isCamOff = false, isSpeakerOn = false, userForcedSpeaker = false;
     private boolean hasRemoteSdp = false, isCallerCurrent = false, isAutoAccepting = false;
     private long callStartTime = 0, lastScreenReqTime = 0;
     private final Handler timerHandler = new Handler(Looper.getMainLooper());
@@ -223,7 +226,6 @@ public class ChatActivity extends AppCompatActivity {
         }
         listenIncomingCalls();
 
-        // Back বাটনে চাপ দিলে কল না কেটে মিনিমাইজ বা ব্যাকগ্রাউন্ডে যাবে
         getOnBackPressedDispatcher().addCallback(this, new OnBackPressedCallback(true) {
             @Override
             public void handleOnBackPressed() {
@@ -342,7 +344,6 @@ public class ChatActivity extends AppCompatActivity {
         findViewById(R.id.btnHangup).setOnClickListener(v -> hangupCall(true));
         findViewById(R.id.btnMinimize).setOnClickListener(v -> minimizeCallUI(true));
         btnMaximize.setOnClickListener(v -> minimizeCallUI(false));
-
         btnScreenShare.setOnClickListener(v -> onScreenShareButtonClick());
 
         btnMic.setOnClickListener(v -> {
@@ -358,10 +359,112 @@ public class ChatActivity extends AppCompatActivity {
             btnCam.setAlpha(isCamOff ? 0.45f : 1.0f);
         });
         btnSpeaker.setOnClickListener(v -> {
-            isSpeakerOn = !isSpeakerOn;
-            if (audioManager != null) audioManager.setSpeakerphoneOn(isSpeakerOn);
-            btnSpeaker.setAlpha(isSpeakerOn ? 1.0f : 0.45f);
+            userForcedSpeaker = !isSpeakerOn;
+            routeAudioForCall();
         });
+    }
+
+    /* 🎧 স্মার্ট Bluetooth + Headphone + Speaker অডিও রাউটিং */
+    @SuppressWarnings("deprecation")
+    private void routeAudioForCall() {
+        if (audioManager == null) return;
+        audioManager.setMode(AudioManager.MODE_IN_COMMUNICATION);
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            AudioDeviceInfo bt = null, wired = null, speaker = null, earpiece = null;
+            for (AudioDeviceInfo dev : audioManager.getAvailableCommunicationDevices()) {
+                int type = dev.getType();
+                if (type == AudioDeviceInfo.TYPE_BLE_HEADSET || type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO) {
+                    bt = dev;
+                } else if (type == AudioDeviceInfo.TYPE_WIRED_HEADSET || type == AudioDeviceInfo.TYPE_WIRED_HEADPHONES || type == AudioDeviceInfo.TYPE_USB_HEADSET) {
+                    wired = dev;
+                } else if (type == AudioDeviceInfo.TYPE_BUILTIN_SPEAKER) {
+                    speaker = dev;
+                } else if (type == AudioDeviceInfo.TYPE_BUILTIN_EARPIECE) {
+                    earpiece = dev;
+                }
+            }
+
+            if (userForcedSpeaker && speaker != null) {
+                audioManager.setCommunicationDevice(speaker);
+                isSpeakerOn = true;
+            } else if (bt != null) {
+                audioManager.setCommunicationDevice(bt);
+                isSpeakerOn = false;
+            } else if (wired != null) {
+                audioManager.setCommunicationDevice(wired);
+                isSpeakerOn = false;
+            } else if ("video".equals(activeCallType) && speaker != null) {
+                audioManager.setCommunicationDevice(speaker);
+                isSpeakerOn = true;
+            } else if (earpiece != null) {
+                audioManager.setCommunicationDevice(earpiece);
+                isSpeakerOn = false;
+            }
+        } else {
+            boolean hasBt = false, hasWired = false;
+            for (AudioDeviceInfo dev : audioManager.getDevices(AudioManager.GET_DEVICES_OUTPUTS)) {
+                int type = dev.getType();
+                if (type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO || type == AudioDeviceInfo.TYPE_BLUETOOTH_A2DP) hasBt = true;
+                if (type == AudioDeviceInfo.TYPE_WIRED_HEADSET || type == AudioDeviceInfo.TYPE_WIRED_HEADPHONES) hasWired = true;
+            }
+
+            if (userForcedSpeaker) {
+                audioManager.stopBluetoothSco();
+                audioManager.setBluetoothScoOn(false);
+                audioManager.setSpeakerphoneOn(true);
+                isSpeakerOn = true;
+            } else if (hasBt) {
+                audioManager.setSpeakerphoneOn(false);
+                audioManager.startBluetoothSco();
+                audioManager.setBluetoothScoOn(true);
+                isSpeakerOn = false;
+            } else if (hasWired) {
+                audioManager.stopBluetoothSco();
+                audioManager.setBluetoothScoOn(false);
+                audioManager.setSpeakerphoneOn(false);
+                isSpeakerOn = false;
+            } else {
+                audioManager.stopBluetoothSco();
+                audioManager.setBluetoothScoOn(false);
+                isSpeakerOn = "video".equals(activeCallType);
+                audioManager.setSpeakerphoneOn(isSpeakerOn);
+            }
+        }
+        btnSpeaker.setAlpha(isSpeakerOn ? 1.0f : 0.45f);
+    }
+
+    private void registerBluetoothListener() {
+        if (audioDeviceCallback != null) return;
+        audioDeviceCallback = new AudioDeviceCallback() {
+            @Override public void onAudioDevicesAdded(AudioDeviceInfo[] addedDevices) {
+                if (callOverlay.getVisibility() == View.VISIBLE) {
+                    userForcedSpeaker = false;
+                    routeAudioForCall();
+                }
+            }
+            @Override public void onAudioDevicesRemoved(AudioDeviceInfo[] removedDevices) {
+                if (callOverlay.getVisibility() == View.VISIBLE) routeAudioForCall();
+            }
+        };
+        audioManager.registerAudioDeviceCallback(audioDeviceCallback, timerHandler);
+    }
+
+    @SuppressWarnings("deprecation")
+    private void resetAudioRouting() {
+        if (audioManager == null) return;
+        if (audioDeviceCallback != null) {
+            audioManager.unregisterAudioDeviceCallback(audioDeviceCallback);
+            audioDeviceCallback = null;
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            audioManager.clearCommunicationDevice();
+        } else {
+            audioManager.stopBluetoothSco();
+            audioManager.setBluetoothScoOn(false);
+            audioManager.setSpeakerphoneOn(false);
+        }
+        audioManager.setMode(AudioManager.MODE_NORMAL);
     }
 
     private void onScreenShareButtonClick() {
@@ -378,19 +481,16 @@ public class ChatActivity extends AppCompatActivity {
         }
 
         String[] opts = {"📱 Share My Screen (আমার স্ক্রিন দেখাও)", "📲 Request Friend's Screen (অন্য ফোনের স্ক্রিন দেখো)"};
-        new AlertDialog.Builder(this)
-                .setTitle("Screen Share")
-                .setItems(opts, (d, which) -> {
-                    if (which == 0) {
-                        launchMyScreenSharePrompt();
-                    } else {
-                        Map<String, Object> req = new HashMap<>();
-                        req.put("screenRequestTarget", peerUid);
-                        req.put("screenRequestTime", System.currentTimeMillis());
-                        db.collection("calls").document(callDocId).set(req, SetOptions.merge());
-                        Toast.makeText(this, "অন্য ফোনে স্ক্রিন শেয়ার পপআপ পাঠানো হয়েছে!", Toast.LENGTH_SHORT).show();
-                    }
-                }).show();
+        new AlertDialog.Builder(this).setTitle("Screen Share").setItems(opts, (d, which) -> {
+            if (which == 0) launchMyScreenSharePrompt();
+            else {
+                Map<String, Object> req = new HashMap<>();
+                req.put("screenRequestTarget", peerUid);
+                req.put("screenRequestTime", System.currentTimeMillis());
+                db.collection("calls").document(callDocId).set(req, SetOptions.merge());
+                Toast.makeText(this, "অন্য ফোনে স্ক্রিন শেয়ার পপআপ পাঠানো হয়েছে!", Toast.LENGTH_SHORT).show();
+            }
+        }).show();
     }
 
     private void launchMyScreenSharePrompt() {
@@ -481,9 +581,7 @@ public class ChatActivity extends AppCompatActivity {
         Map<String, Object> meta = new HashMap<>();
         meta.put("participants", Arrays.asList(myUid, peerUid));
         meta.put("lastMessage", "image".equals(type) ? "📷 Photo" : ("voice".equals(type) ? "🎤 Voice message" : text));
-        meta.put("lastTimestamp", now);
-        meta.put("lastSenderId", myUid);
-        meta.put("lastSenderName", myName);
+        meta.put("lastTimestamp", now); meta.put("lastSenderId", myUid); meta.put("lastSenderName", myName);
         db.collection("chats").document(chatId).set(meta, SetOptions.merge());
     }
 
@@ -626,6 +724,7 @@ public class ChatActivity extends AppCompatActivity {
         localVideoView = findViewById(R.id.localVideoView);
         localVideoView.init(eglBase.getEglBaseContext(), null);
         localVideoView.setScalingType(RendererCommon.ScalingType.SCALE_ASPECT_BALANCED);
+        localVideoView.setEnableHardwareScaler(true);
         localVideoView.setMirror(true);
         localVideoView.setZOrderMediaOverlay(true);
         localVideoView.setOutlineProvider(new ViewOutlineProvider() {
@@ -649,17 +748,14 @@ public class ChatActivity extends AppCompatActivity {
             }
             @Override public void onConnectionStateChanged(PeerConnection.PeerConnectionState state) {
                 runOnUiThread(() -> {
-                    if (state == PeerConnection.PeerConnectionState.CONNECTING) {
-                        tvCallTimer.setText("Connecting...");
-                    } else if (state == PeerConnection.PeerConnectionState.CONNECTED) {
+                    if (state == PeerConnection.PeerConnectionState.CONNECTING) tvCallTimer.setText("Connecting...");
+                    else if (state == PeerConnection.PeerConnectionState.CONNECTED) {
                         cancelCallTimeout();
                         if ("video".equals(activeCallType)) setLocalVideoFullscreen(false);
+                        routeAudioForCall();
                         startCallTimer();
-                    } else if (state == PeerConnection.PeerConnectionState.FAILED) {
-                        tvCallTimer.setText("Connection Failed");
-                    } else if (state == PeerConnection.PeerConnectionState.DISCONNECTED) {
-                        tvCallTimer.setText("Reconnecting...");
-                    }
+                    } else if (state == PeerConnection.PeerConnectionState.FAILED) tvCallTimer.setText("Connection Failed");
+                    else if (state == PeerConnection.PeerConnectionState.DISCONNECTED) tvCallTimer.setText("Reconnecting...");
                 });
             }
             @Override public void onScreenShareStopped() {
@@ -707,15 +803,24 @@ public class ChatActivity extends AppCompatActivity {
         });
     }
 
-    private void checkPermissionsAndStartCall(String type) {
-        boolean hasCam = ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED;
-        boolean hasMic = ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED;
-        if (!hasCam || !hasMic) {
-            pendingPermissionAction = () -> startCall(type);
-            permissionLauncher.launch(new String[]{Manifest.permission.CAMERA, Manifest.permission.RECORD_AUDIO});
-            return;
+    private void requestCallPermissionsAndRun(Runnable action) {
+        List<String> needed = new ArrayList<>();
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) needed.add(Manifest.permission.CAMERA);
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) needed.add(Manifest.permission.RECORD_AUDIO);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
+                && ContextCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED) {
+            needed.add(Manifest.permission.BLUETOOTH_CONNECT);
         }
-        startCall(type);
+        if (!needed.isEmpty()) {
+            pendingPermissionAction = action;
+            permissionLauncher.launch(needed.toArray(new String[0]));
+        } else {
+            action.run();
+        }
+    }
+
+    private void checkPermissionsAndStartCall(String type) {
+        requestCallPermissionsAndRun(() -> startCall(type));
     }
 
     @SuppressWarnings("unchecked")
@@ -801,14 +906,7 @@ public class ChatActivity extends AppCompatActivity {
     }
 
     private void acceptIncomingCallWithPermission(DocumentSnapshot snap) {
-        boolean hasCam = ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED;
-        boolean hasMic = ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED;
-        if (!hasCam || !hasMic) {
-            pendingPermissionAction = () -> acceptIncomingCall(snap);
-            permissionLauncher.launch(new String[]{Manifest.permission.CAMERA, Manifest.permission.RECORD_AUDIO});
-            return;
-        }
-        acceptIncomingCall(snap);
+        requestCallPermissionsAndRun(() -> acceptIncomingCall(snap));
     }
 
     @SuppressWarnings("unchecked")
@@ -887,17 +985,19 @@ public class ChatActivity extends AppCompatActivity {
     private void stopRingtone() { try { if (ringtone != null && ringtone.isPlaying()) ringtone.stop(); } catch (Exception ignored) {} }
 
     private void setupCallUI(String type, String targetName, boolean isOutgoing) {
-        audioManager.setMode(AudioManager.MODE_IN_COMMUNICATION);
-        audioManager.setSpeakerphoneOn("video".equals(type));
-        isSpeakerOn = "video".equals(type); isMuted = false; isCamOff = false;
+        userForcedSpeaker = false;
+        isMuted = false; isCamOff = false;
         btnMic.setImageResource(R.drawable.ic_mic); btnMic.setAlpha(1.0f);
-        btnCam.setAlpha(1.0f); btnSpeaker.setAlpha(isSpeakerOn ? 1.0f : 0.45f);
+        btnCam.setAlpha(1.0f);
         btnScreenShare.clearColorFilter();
 
         minimizeCallUI(false);
         callOverlay.setVisibility(View.VISIBLE);
         tvActiveTarget.setText(targetName != null ? targetName : "Friend");
         tvCallTimer.setText(isOutgoing ? "Calling..." : "Connecting...");
+
+        registerBluetoothListener();
+        routeAudioForCall();
 
         boolean isVid = "video".equals(type);
         localVideoView.setVisibility(isVid ? View.VISIBLE : View.GONE);
@@ -946,7 +1046,7 @@ public class ChatActivity extends AppCompatActivity {
         webRTCManager.endCall();
         localVideoView.clearImage(); remoteVideoView.clearImage();
         callOverlay.setVisibility(View.GONE);
-        audioManager.setMode(AudioManager.MODE_NORMAL);
+        resetAudioRouting();
         if (notifyFirebase) db.collection("calls").document(callDocId).update("status", "ended");
     }
 
@@ -959,6 +1059,7 @@ public class ChatActivity extends AppCompatActivity {
         stopRingtone(); cancelCallTimeout();
         stopService(new Intent(this, ScreenShareService.class));
         if (callOverlay != null && callOverlay.getVisibility() == View.VISIBLE) hangupCall(true);
+        else resetAudioRouting();
         db.collection("users").document(myUid).update("typingTo", "");
         if (msgListener != null) msgListener.remove();
         if (peerListener != null) peerListener.remove();
