@@ -1,18 +1,10 @@
 package com.wevlo.amohir;
 
 public class MessageModel {
-    private String id;
-    private String text;
-    private String type; // text, image, voice
-    private String mediaUrl;
-    private String senderId;
-    private String senderName;
+    private String id, text, type, mediaUrl, senderId, senderName;
+    private String replyToSender, replyToText, reaction, voiceDuration, fileName, latLng;
     private long timestamp;
-    private boolean seen;
-    private String replyToSender;
-    private String replyToText;
-    private String reaction;
-    private String voiceDuration;
+    private boolean seen, edited, deleted, forwarded;
 
     public MessageModel() {}
 
@@ -51,4 +43,19 @@ public class MessageModel {
 
     public String getVoiceDuration() { return voiceDuration; }
     public void setVoiceDuration(String voiceDuration) { this.voiceDuration = voiceDuration; }
+
+    public String getFileName() { return fileName; }
+    public void setFileName(String fileName) { this.fileName = fileName; }
+
+    public String getLatLng() { return latLng; }
+    public void setLatLng(String latLng) { this.latLng = latLng; }
+
+    public boolean isEdited() { return edited; }
+    public void setEdited(boolean edited) { this.edited = edited; }
+
+    public boolean isDeleted() { return deleted; }
+    public void setDeleted(boolean deleted) { this.deleted = deleted; }
+
+    public boolean isForwarded() { return forwarded; }
+    public void setForwarded(boolean forwarded) { this.forwarded = forwarded; }
 }
