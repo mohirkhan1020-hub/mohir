@@ -2,82 +2,30 @@
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
-    android:layout_height="76dp"
-    android:background="?attr/selectableItemBackground"
-    android:gravity="center_vertical"
-    android:orientation="horizontal"
-    android:paddingHorizontal="16dp">
-
-    <FrameLayout android:layout_width="52dp" android:layout_height="52dp">
-        <TextView
-            android:id="@+id/tvAvatar"
-            android:layout_width="match_parent"
-            android:layout_height="match_parent"
-            android:background="@drawable/bg_wa_circle_gray"
-            android:gravity="center"
-            android:text="A"
-            android:textColor="#FFFFFF"
-            android:textSize="20sp"
-            android:textStyle="bold" />
-
-        <com.google.android.material.imageview.ShapeableImageView
-            android:id="@+id/ivAvatar"
-            android:layout_width="match_parent"
-            android:layout_height="match_parent"
-            android:scaleType="centerCrop"
-            android:visibility="gone"
-            app:shapeAppearanceOverlay="@style/CircleImage" />
-
-        <View
-            android:id="@+id/viewOnline"
-            android:layout_width="13dp"
-            android:layout_height="13dp"
-            android:layout_gravity="bottom|end"
-            android:background="@drawable/bg_wa_online_dot"
-            android:visibility="gone" />
-    </FrameLayout>
+    android:layout_height="wrap_content"
+    android:orientation="vertical">
 
     <LinearLayout
-        android:layout_width="0dp"
-        android:layout_height="wrap_content"
-        android:layout_marginStart="14dp"
-        android:layout_weight="1"
-        android:orientation="vertical">
+        android:layout_width="match_parent"
+        android:layout_height="76dp"
+        android:background="?attr/selectableItemBackground"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:paddingHorizontal="16dp">
 
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:gravity="center_vertical">
+        <FrameLayout android:layout_width="54dp" android:layout_height="54dp">
+            <TextView android:id="@+id/tvAvatar" android:layout_width="match_parent" android:layout_height="match_parent" android:background="@drawable/bg_wa_circle_gray" android:gravity="center" android:text="A" android:textColor="#FFFFFF" android:textSize="20sp" android:textStyle="bold" />
+            <com.google.android.material.imageview.ShapeableImageView android:id="@+id/ivAvatar" android:layout_width="match_parent" android:layout_height="match_parent" android:scaleType="centerCrop" android:visibility="gone" app:shapeAppearanceOverlay="@style/CircleImage" />
+            <View android:id="@+id/viewOnline" android:layout_width="14dp" android:layout_height="14dp" android:layout_gravity="bottom|end" android:background="@drawable/bg_wa_online_dot" android:visibility="gone" />
+        </FrameLayout>
 
-            <TextView
-                android:id="@+id/tvName"
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:ellipsize="end"
-                android:maxLines="1"
-                android:text="User Name"
-                android:textColor="#E9EDEF"
-                android:textSize="16.5sp"
-                android:textStyle="bold" />
-
-            <TextView
-                android:id="@+id/tvStatusTime"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:textColor="#8696A0"
-                android:textSize="12sp" />
+        <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content" android:layout_marginStart="14dp" android:layout_weight="1" android:orientation="vertical">
+            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center_vertical">
+                <TextView android:id="@+id/tvName" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:ellipsize="end" android:maxLines="1" android:text="User" android:textColor="#E9EDEF" android:textSize="16.5sp" android:textStyle="bold" />
+                <TextView android:id="@+id/tvStatusTime" android:layout_width="wrap_content" android:layout_height="wrap_content" android:textColor="#8696A0" android:textSize="12sp" />
+            </LinearLayout>
+            <TextView android:id="@+id/tvAbout" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="4dp" android:ellipsize="end" android:maxLines="1" android:text="Hey there! I am using WhatsApp." android:textColor="#8696A0" android:textSize="13.5sp" />
         </LinearLayout>
-
-        <TextView
-            android:id="@+id/tvAbout"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="3dp"
-            android:ellipsize="end"
-            android:maxLines="1"
-            android:text="Hey there! I am using WhatsApp."
-            android:textColor="#8696A0"
-            android:textSize="13.5sp" />
     </LinearLayout>
+    <View android:layout_width="match_parent" android:layout_height="0.5dp" android:layout_marginStart="84dp" android:background="#152026" />
 </LinearLayout>
