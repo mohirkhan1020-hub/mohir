@@ -22,6 +22,7 @@ public class UserAdapter extends RecyclerView.Adapter<UserAdapter.VH> {
 
     public interface OnUserClickListener {
         void onUserClick(UserModel user);
+        void onAvatarClick(UserModel user);
     }
 
     private final List<UserModel> users;
@@ -48,42 +49,36 @@ public class UserAdapter extends RecyclerView.Adapter<UserAdapter.VH> {
                 : (u.getAbout() != null ? u.getAbout() : "Hey there! I am using WhatsApp.");
         h.tvAbout.setText(subtitle);
 
-        if (u.isGlobalRoom()) {
-            h.tvAvatar.setText("🌍");
-            h.tvAvatar.setVisibility(View.VISIBLE);
-            h.ivAvatar.setVisibility(View.GONE);
-            h.viewOnline.setVisibility(View.VISIBLE);
-            h.tvStatusTime.setText("GROUP");
-            h.tvStatusTime.setTextColor(Color.parseColor("#25D366"));
+        if (u.getAvatarBase64() != null && !u.getAvatarBase64().isEmpty()) {
+            Bitmap bmp = decodeBase64(u.getAvatarBase64());
+            if (bmp != null) {
+                h.ivAvatar.setImageBitmap(bmp);
+                h.ivAvatar.setVisibility(View.VISIBLE);
+                h.tvAvatar.setVisibility(View.GONE);
+            }
         } else {
-            if (u.getAvatarBase64() != null && !u.getAvatarBase64().isEmpty()) {
-                Bitmap bmp = decodeBase64(u.getAvatarBase64());
-                if (bmp != null) {
-                    h.ivAvatar.setImageBitmap(bmp);
-                    h.ivAvatar.setVisibility(View.VISIBLE);
-                    h.tvAvatar.setVisibility(View.GONE);
-                }
-            } else {
-                h.ivAvatar.setVisibility(View.GONE);
-                h.tvAvatar.setVisibility(View.VISIBLE);
-                String n = u.getName();
-                h.tvAvatar.setText((n != null && !n.isEmpty()) ? n.substring(0, 1).toUpperCase() : "👤");
-            }
-
-            h.viewOnline.setVisibility(u.isOnline() ? View.VISIBLE : View.GONE);
-            if (u.getLastMsgTime() > 0) {
-                h.tvStatusTime.setText(new SimpleDateFormat("hh:mm a", Locale.getDefault()).format(new Date(u.getLastMsgTime())));
-                h.tvStatusTime.setTextColor(Color.parseColor("#8696A0"));
-            } else if (u.isOnline()) {
-                h.tvStatusTime.setText("online");
-                h.tvStatusTime.setTextColor(Color.parseColor("#25D366"));
-            } else if (u.getLastSeen() > 0) {
-                h.tvStatusTime.setText(new SimpleDateFormat("hh:mm a", Locale.getDefault()).format(new Date(u.getLastSeen())));
-                h.tvStatusTime.setTextColor(Color.parseColor("#8696A0"));
-            } else {
-                h.tvStatusTime.setText("");
-            }
+            h.ivAvatar.setVisibility(View.GONE);
+            h.tvAvatar.setVisibility(View.VISIBLE);
+            String n = u.getName();
+            h.tvAvatar.setText((n != null && !n.isEmpty()) ? n.substring(0, 1).toUpperCase() : "👤");
         }
+
+        h.viewOnline.setVisibility(u.isOnline() ? View.VISIBLE : View.GONE);
+        if (u.getLastMsgTime() > 0) {
+            h.tvStatusTime.setText(new SimpleDateFormat("hh:mm a", Locale.getDefault()).format(new Date(u.getLastMsgTime())));
+            h.tvStatusTime.setTextColor(Color.parseColor("#8696A0"));
+        } else if (u.isOnline()) {
+            h.tvStatusTime.setText("online");
+            h.tvStatusTime.setTextColor(Color.parseColor("#25D366"));
+        } else if (u.getLastSeen() > 0) {
+            h.tvStatusTime.setText(new SimpleDateFormat("hh:mm a", Locale.getDefault()).format(new Date(u.getLastSeen())));
+            h.tvStatusTime.setTextColor(Color.parseColor("#8696A0"));
+        } else {
+            h.tvStatusTime.setText("");
+        }
+
+        h.tvAvatar.setOnClickListener(v -> listener.onAvatarClick(u));
+        h.ivAvatar.setOnClickListener(v -> listener.onAvatarClick(u));
         h.itemView.setOnClickListener(v -> listener.onUserClick(u));
     }
 
