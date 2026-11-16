@@ -611,7 +611,7 @@ public class MainActivity extends AppCompatActivity {
             byte[] buf = new byte[(int) f.length()];
             fis.read(buf);
             JSONArray arr = new JSONArray(new String(buf));
-            for (int i = 0; i < arr.length; i++) {
+            for (int i = 0; i < arr.length(); i++) {
                 JSONObject obj = arr.getJSONObject(i);
                 Map<String, Object> map = new HashMap<>();
                 for (java.util.Iterator<String> it = obj.keys(); it.hasNext(); ) {
