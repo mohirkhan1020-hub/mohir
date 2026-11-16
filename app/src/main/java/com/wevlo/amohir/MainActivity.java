@@ -35,8 +35,6 @@ import androidx.activity.result.ActivityResultLauncher;
 import androidx.activity.result.contract.ActivityResultContracts;
 import androidx.annotation.NonNull;
 import androidx.appcompat.app.AppCompatActivity;
-import androidx.biometric.BiometricManager;
-import androidx.biometric.BiometricPrompt;
 import androidx.core.content.ContextCompat;
 import androidx.core.content.FileProvider;
 import androidx.recyclerview.widget.LinearLayoutManager;
@@ -148,7 +146,8 @@ public class MainActivity extends AppCompatActivity {
         initFirebase();
         initViews();
 
-        // Fingerprint lock logic has been REMOVED to prevent auto-exit
+        // Fingerprint lock logic has been REMOVED here to prevent auto-exit.
+        // The app will now proceed directly to the chats.
         proceedAfterUnlock();
     }
 
@@ -611,7 +610,7 @@ public class MainActivity extends AppCompatActivity {
             byte[] buf = new byte[(int) f.length()];
             fis.read(buf);
             JSONArray arr = new JSONArray(new String(buf));
-            for (int i = 0; i < arr.length(); i++) {
+            for (int i = 0; i < arr.length; i++) {
                 JSONObject obj = arr.getJSONObject(i);
                 Map<String, Object> map = new HashMap<>();
                 for (java.util.Iterator<String> it = obj.keys(); it.hasNext(); ) {
