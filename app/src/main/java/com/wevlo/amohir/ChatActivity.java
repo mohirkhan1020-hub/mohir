@@ -28,6 +28,7 @@ import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
+import android.os.PowerManager;
 import android.text.Editable;
 import android.text.TextWatcher;
 import android.util.Base64;
@@ -36,6 +37,7 @@ import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.ViewOutlineProvider;
+import android.view.WindowManager;
 import android.widget.EditText;
 import android.widget.FrameLayout;
 import android.widget.GridLayout;
@@ -124,10 +126,11 @@ public class ChatActivity extends AppCompatActivity {
     private AudioManager audioManager;
     private AudioFocusRequest audioFocusRequest;
     private AudioDeviceCallback audioDeviceCallback;
+    private PowerManager.WakeLock callWakeLock;
     private Ringtone ringtone;
 
     private String activeCallType = "video";
-    private String selectedAudioRoute = "auto"; // auto, bluetooth, speaker, earpiece
+    private String selectedAudioRoute = "auto";
     private boolean isMuted = false, isCamOff = false;
     private boolean hasRemoteSdp = false, isCallerCurrent = false, isAutoAccepting = false;
     private long callStartTime = 0, lastScreenReqTime = 0;
@@ -365,7 +368,6 @@ public class ChatActivity extends AppCompatActivity {
         btnSpeaker.setOnClickListener(v -> showAudioOutputChooserOrToggle());
     }
 
-    /* 🎧 WhatsApp-এর মতো Bluetooth / Speaker / Earpiece অডিও সিস্টেম */
     private boolean isBluetoothConnected() {
         if (audioManager == null) return false;
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
@@ -384,14 +386,12 @@ public class ChatActivity extends AppCompatActivity {
     private void showAudioOutputChooserOrToggle() {
         if (isBluetoothConnected()) {
             String[] opts = {"🎧 Bluetooth", "🔊 Speaker", "📱 Phone (Earpiece)"};
-            new AlertDialog.Builder(this)
-                    .setTitle("Audio Output")
-                    .setItems(opts, (d, which) -> {
-                        if (which == 0) selectedAudioRoute = "bluetooth";
-                        else if (which == 1) selectedAudioRoute = "speaker";
-                        else selectedAudioRoute = "earpiece";
-                        routeAudioForCall();
-                    }).show();
+            new AlertDialog.Builder(this).setTitle("Audio Output").setItems(opts, (d, which) -> {
+                if (which == 0) selectedAudioRoute = "bluetooth";
+                else if (which == 1) selectedAudioRoute = "speaker";
+                else selectedAudioRoute = "earpiece";
+                routeAudioForCall();
+            }).show();
         } else {
             selectedAudioRoute = "speaker".equals(selectedAudioRoute) ? "earpiece" : "speaker";
             routeAudioForCall();
@@ -408,10 +408,8 @@ public class ChatActivity extends AppCompatActivity {
                         .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
                         .build();
                 audioFocusRequest = new AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT)
-                        .setAudioAttributes(attrs)
-                        .setAcceptsDelayedFocusGain(true)
-                        .setOnAudioFocusChangeListener(fc -> {})
-                        .build();
+                        .setAudioAttributes(attrs).setAcceptsDelayedFocusGain(true)
+                        .setOnAudioFocusChangeListener(fc -> {}).build();
             }
             audioManager.requestAudioFocus(audioFocusRequest);
         } else {
@@ -426,11 +424,6 @@ public class ChatActivity extends AppCompatActivity {
         audioManager.setMode(AudioManager.MODE_IN_COMMUNICATION);
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            if (ContextCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED
-                    && isBluetoothConnected()) {
-                Toast.makeText(this, "Bluetooth কলের জন্য 'Nearby devices' পারমিশন দিন", Toast.LENGTH_SHORT).show();
-            }
-
             AudioDeviceInfo bt = null, wired = null, speaker = null, earpiece = null;
             for (AudioDeviceInfo dev : audioManager.getAvailableCommunicationDevices()) {
                 int type = dev.getType();
@@ -442,21 +435,13 @@ public class ChatActivity extends AppCompatActivity {
 
             AudioDeviceInfo target = null;
             String activeLabel = "earpiece";
-            if ("speaker".equals(selectedAudioRoute) && speaker != null) {
-                target = speaker; activeLabel = "speaker";
-            } else if ("earpiece".equals(selectedAudioRoute) && earpiece != null) {
-                target = earpiece; activeLabel = "earpiece";
-            } else if ("bluetooth".equals(selectedAudioRoute) && bt != null) {
-                target = bt; activeLabel = "bluetooth";
-            } else if (bt != null) {
-                target = bt; activeLabel = "bluetooth";
-            } else if (wired != null) {
-                target = wired; activeLabel = "wired";
-            } else if ("video".equals(activeCallType) && speaker != null) {
-                target = speaker; activeLabel = "speaker";
-            } else if (earpiece != null) {
-                target = earpiece; activeLabel = "earpiece";
-            }
+            if ("speaker".equals(selectedAudioRoute) && speaker != null) { target = speaker; activeLabel = "speaker"; }
+            else if ("earpiece".equals(selectedAudioRoute) && earpiece != null) { target = earpiece; activeLabel = "earpiece"; }
+            else if ("bluetooth".equals(selectedAudioRoute) && bt != null) { target = bt; activeLabel = "bluetooth"; }
+            else if (bt != null) { target = bt; activeLabel = "bluetooth"; }
+            else if (wired != null) { target = wired; activeLabel = "wired"; }
+            else if ("video".equals(activeCallType) && speaker != null) { target = speaker; activeLabel = "speaker"; }
+            else if (earpiece != null) { target = earpiece; activeLabel = "earpiece"; }
 
             if (target != null) {
                 boolean ok = audioManager.setCommunicationDevice(target);
@@ -502,14 +487,11 @@ public class ChatActivity extends AppCompatActivity {
 
     private void updateSpeakerIcon(String activeLabel) {
         if ("bluetooth".equals(activeLabel)) {
-            btnSpeaker.setColorFilter(Color.parseColor("#53BDEB"));
-            btnSpeaker.setAlpha(1.0f);
+            btnSpeaker.setColorFilter(Color.parseColor("#53BDEB")); btnSpeaker.setAlpha(1.0f);
         } else if ("speaker".equals(activeLabel)) {
-            btnSpeaker.setColorFilter(Color.parseColor("#25D366"));
-            btnSpeaker.setAlpha(1.0f);
+            btnSpeaker.setColorFilter(Color.parseColor("#25D366")); btnSpeaker.setAlpha(1.0f);
         } else {
-            btnSpeaker.clearColorFilter();
-            btnSpeaker.setAlpha(0.55f);
+            btnSpeaker.clearColorFilter(); btnSpeaker.setAlpha(0.55f);
         }
     }
 
@@ -522,10 +504,7 @@ public class ChatActivity extends AppCompatActivity {
         if (audioDeviceCallback != null) return;
         audioDeviceCallback = new AudioDeviceCallback() {
             @Override public void onAudioDevicesAdded(AudioDeviceInfo[] addedDevices) {
-                if (callOverlay.getVisibility() == View.VISIBLE) {
-                    selectedAudioRoute = "auto";
-                    routeAudioForCall();
-                }
+                if (callOverlay.getVisibility() == View.VISIBLE) { selectedAudioRoute = "auto"; routeAudioForCall(); }
             }
             @Override public void onAudioDevicesRemoved(AudioDeviceInfo[] removedDevices) {
                 if (callOverlay.getVisibility() == View.VISIBLE) routeAudioForCall();
@@ -537,17 +516,9 @@ public class ChatActivity extends AppCompatActivity {
     @SuppressWarnings("deprecation")
     private void resetAudioRouting() {
         if (audioManager == null) return;
-        if (audioDeviceCallback != null) {
-            audioManager.unregisterAudioDeviceCallback(audioDeviceCallback);
-            audioDeviceCallback = null;
-        }
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            audioManager.clearCommunicationDevice();
-        } else {
-            audioManager.stopBluetoothSco();
-            audioManager.setBluetoothScoOn(false);
-            audioManager.setSpeakerphoneOn(false);
-        }
+        if (audioDeviceCallback != null) { audioManager.unregisterAudioDeviceCallback(audioDeviceCallback); audioDeviceCallback = null; }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) audioManager.clearCommunicationDevice();
+        else { audioManager.stopBluetoothSco(); audioManager.setBluetoothScoOn(false); audioManager.setSpeakerphoneOn(false); }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && audioFocusRequest != null) {
             audioManager.abandonAudioFocusRequest(audioFocusRequest);
             audioFocusRequest = null;
@@ -830,21 +801,27 @@ public class ChatActivity extends AppCompatActivity {
             }
             @Override public void onRemoteStreamAdded(VideoTrack videoTrack) {
                 runOnUiThread(() -> {
+                    cancelCallTimeout();
                     if ("video".equals(activeCallType)) setLocalVideoFullscreen(false);
                     videoTrack.addSink(remoteVideoView);
+                    startCallTimer();
                 });
             }
             @Override public void onConnectionStateChanged(PeerConnection.PeerConnectionState state) {
                 runOnUiThread(() -> {
-                    if (state == PeerConnection.PeerConnectionState.CONNECTING) tvCallTimer.setText("Connecting...");
-                    else if (state == PeerConnection.PeerConnectionState.CONNECTED) {
+                    if (state == PeerConnection.PeerConnectionState.CONNECTING) {
+                        if (timerRunnable == null) tvCallTimer.setText("Connecting...");
+                    } else if (state == PeerConnection.PeerConnectionState.CONNECTED) {
                         cancelCallTimeout();
                         if ("video".equals(activeCallType)) setLocalVideoFullscreen(false);
                         routeAudioForCall();
                         scheduleBluetoothRouteRetries();
                         startCallTimer();
-                    } else if (state == PeerConnection.PeerConnectionState.FAILED) tvCallTimer.setText("Connection Failed");
-                    else if (state == PeerConnection.PeerConnectionState.DISCONNECTED) tvCallTimer.setText("Reconnecting...");
+                    } else if (state == PeerConnection.PeerConnectionState.FAILED) {
+                        tvCallTimer.setText("Connection Lost");
+                    } else if (state == PeerConnection.PeerConnectionState.DISCONNECTED) {
+                        tvCallTimer.setText("Reconnecting...");
+                    }
                 });
             }
             @Override public void onScreenShareStopped() {
@@ -915,12 +892,13 @@ public class ChatActivity extends AppCompatActivity {
     @SuppressWarnings("unchecked")
     private void startCall(String type) {
         isCallerCurrent = true; activeCallType = type; hasRemoteSdp = false;
+        if (incomingListener != null) { incomingListener.remove(); incomingListener = null; }
         logCallHistory(type);
         setupCallUI(type, tvChatName.getText().toString(), true);
 
         cancelCallTimeout();
         callTimeoutRunnable = () -> {
-            if (callOverlay.getVisibility() == View.VISIBLE && timerRunnable == null) {
+            if (callOverlay.getVisibility() == View.VISIBLE && !hasRemoteSdp && timerRunnable == null) {
                 Toast.makeText(this, "No answer", Toast.LENGTH_SHORT).show();
                 hangupCall(true);
             }
@@ -952,8 +930,11 @@ public class ChatActivity extends AppCompatActivity {
                             Map<String, Object> ans = (Map<String, Object>) snap.get("answer");
                             if (ans != null) {
                                 hasRemoteSdp = true;
+                                cancelCallTimeout();
                                 webRTCManager.setRemoteDescription((String) ans.get("type"), (String) ans.get("sdp"), () ->
-                                        runOnUiThread(() -> tvCallTimer.setText("Connecting..."))
+                                        runOnUiThread(() -> {
+                                            if (timerRunnable == null) tvCallTimer.setText("Connecting...");
+                                        })
                                 );
                             }
                         } else if ("ended".equals(status)) hangupCall(false);
@@ -969,6 +950,7 @@ public class ChatActivity extends AppCompatActivity {
     }
 
     private void listenIncomingCalls() {
+        if (incomingListener != null) incomingListener.remove();
         incomingListener = db.collection("calls").document(callDocId).addSnapshotListener((snap, err) -> {
             if (snap == null || !snap.exists()) return;
             handleRemoteScreenRequest(snap);
@@ -1082,6 +1064,13 @@ public class ChatActivity extends AppCompatActivity {
         btnCam.setAlpha(1.0f);
         btnScreenShare.clearColorFilter();
 
+        getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+        acquireCallWakeLock();
+
+        Intent callSvc = new Intent(this, ActiveCallService.class);
+        callSvc.putExtra("peerName", targetName);
+        ContextCompat.startForegroundService(this, callSvc);
+
         minimizeCallUI(false);
         callOverlay.setVisibility(View.VISIBLE);
         tvActiveTarget.setText(targetName != null ? targetName : "Friend");
@@ -1096,6 +1085,20 @@ public class ChatActivity extends AppCompatActivity {
         remoteVideoView.setVisibility(isVid ? View.VISIBLE : View.GONE);
         audioCallAvatarBox.setVisibility(isVid ? View.GONE : View.VISIBLE);
         if (isVid) setLocalVideoFullscreen(isOutgoing);
+    }
+
+    private void acquireCallWakeLock() {
+        try {
+            if (callWakeLock == null) {
+                PowerManager pm = (PowerManager) getSystemService(POWER_SERVICE);
+                if (pm != null) callWakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "WhatsApp::ActiveCall");
+            }
+            if (callWakeLock != null && !callWakeLock.isHeld()) callWakeLock.acquire(60 * 60 * 1000L);
+        } catch (Exception ignored) {}
+    }
+
+    private void releaseCallWakeLock() {
+        try { if (callWakeLock != null && callWakeLock.isHeld()) callWakeLock.release(); } catch (Exception ignored) {}
     }
 
     private void minimizeCallUI(boolean minimize) {
@@ -1130,6 +1133,9 @@ public class ChatActivity extends AppCompatActivity {
 
     private void hangupCall(boolean notifyFirebase) {
         stopRingtone(); cancelCallTimeout(); isAutoAccepting = false;
+        getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+        releaseCallWakeLock();
+        stopService(new Intent(this, ActiveCallService.class));
         stopService(new Intent(this, ScreenShareService.class));
         btnScreenShare.clearColorFilter();
         if (timerRunnable != null) { timerHandler.removeCallbacks(timerRunnable); timerRunnable = null; }
@@ -1140,6 +1146,7 @@ public class ChatActivity extends AppCompatActivity {
         callOverlay.setVisibility(View.GONE);
         resetAudioRouting();
         if (notifyFirebase) db.collection("calls").document(callDocId).update("status", "ended");
+        if (incomingListener == null) listenIncomingCalls();
     }
 
     @Override protected void onStart() { super.onStart(); isChatOpen = true; }
@@ -1148,7 +1155,8 @@ public class ChatActivity extends AppCompatActivity {
     @Override
     protected void onDestroy() {
         super.onDestroy();
-        stopRingtone(); cancelCallTimeout();
+        stopRingtone(); cancelCallTimeout(); releaseCallWakeLock();
+        stopService(new Intent(this, ActiveCallService.class));
         stopService(new Intent(this, ScreenShareService.class));
         if (callOverlay != null && callOverlay.getVisibility() == View.VISIBLE) hangupCall(true);
         else resetAudioRouting();
