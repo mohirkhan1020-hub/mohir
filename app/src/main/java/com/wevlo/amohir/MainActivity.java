@@ -146,8 +146,7 @@ public class MainActivity extends AppCompatActivity {
         initFirebase();
         initViews();
 
-        // Fingerprint lock logic has been REMOVED here to prevent auto-exit.
-        // The app will now proceed directly to the chats.
+        // Fingerprint lock removed for direct access
         proceedAfterUnlock();
     }
 
@@ -610,7 +609,7 @@ public class MainActivity extends AppCompatActivity {
             byte[] buf = new byte[(int) f.length()];
             fis.read(buf);
             JSONArray arr = new JSONArray(new String(buf));
-            for (int i = 0; i < arr.length; i++) {
+            for (int i = 0; i < arr.length(); i++) {
                 JSONObject obj = arr.getJSONObject(i);
                 Map<String, Object> map = new HashMap<>();
                 for (java.util.Iterator<String> it = obj.keys(); it.hasNext(); ) {
@@ -737,7 +736,7 @@ public class MainActivity extends AppCompatActivity {
         } catch (Exception e) { return null; }
     }
 
-    @Override protected void onResume() { super.onResume(); if (myPhone != null && !myPhone.isEmpty()) db.collection("users").document(myPhone).update("online", true, "lastSeen", System.currentTimeMillis()); }
-    @Override protected void onPause() { super.onPause(); if (myPhone != null && !myPhone.isEmpty()) db.collection("users").document(myPhone).update("online", false, "lastSeen", System.currentTimeMillis()); }
-    @Override protected void onDestroy() { super.onDestroy(); if (updateListener != null) updateListener.remove(); if (storyRunnable != null) storyHandler.removeCallbacks(storyRunnable); for (ListenerRegistration r : peerListeners.values()) r.remove(); }
+    @Override protected onResume() { super.onResume(); if (myPhone != null && !myPhone.isEmpty()) db.collection("users").document(myPhone).update("online", true, "lastSeen", System.currentTimeMillis()); }
+    @Override protected onPause() { super.onPause(); if (myPhone != null && !myPhone.isEmpty()) db.collection("users").document(myPhone).update("online", false, "lastSeen", System.currentTimeMillis()); }
+    @Override protected onDestroy() { super.onDestroy(); if (updateListener != null) updateListener.remove(); if (storyRunnable != null) storyHandler.removeCallbacks(storyRunnable); for (ListenerRegistration r : peerListeners.values()) r.remove(); }
 }
