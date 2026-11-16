@@ -42,24 +42,101 @@
                 android:textSize="14sp"
                 android:visibility="gone" />
 
-            <ImageButton android:id="@+id/btnCameraTop" android:layout_width="42dp" android:layout_height="42dp" android:background="?attr/selectableItemBackgroundBorderless" android:src="@drawable/ic_camera" />
-            <ImageButton android:id="@+id/btnSearch" android:layout_width="42dp" android:layout_height="42dp" android:background="?attr/selectableItemBackgroundBorderless" android:src="@drawable/ic_search" />
-            <ImageButton android:id="@+id/btnProfileEdit" android:layout_width="42dp" android:layout_height="42dp" android:background="?attr/selectableItemBackgroundBorderless" android:src="@drawable/ic_more" />
+            <ImageButton
+                android:id="@+id/btnCameraTop"
+                android:layout_width="42dp"
+                android:layout_height="42dp"
+                android:background="?attr/selectableItemBackgroundBorderless"
+                android:src="@drawable/ic_camera" />
+
+            <ImageButton
+                android:id="@+id/btnSearch"
+                android:layout_width="42dp"
+                android:layout_height="42dp"
+                android:background="?attr/selectableItemBackgroundBorderless"
+                android:src="@drawable/ic_search" />
+
+            <ImageButton
+                android:id="@+id/btnProfileEdit"
+                android:layout_width="42dp"
+                android:layout_height="42dp"
+                android:background="?attr/selectableItemBackgroundBorderless"
+                android:src="@drawable/ic_more" />
         </LinearLayout>
 
         <View android:layout_width="match_parent" android:layout_height="0.6dp" android:background="#182229" />
 
         <FrameLayout android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1">
 
-            <LinearLayout android:id="@+id/chatsContainer" android:layout_width="match_parent" android:layout_height="match_parent" android:orientation="vertical">
-                <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal" android:paddingHorizontal="16dp" android:paddingVertical="10dp">
-                    <TextView android:id="@+id/chipAll" android:layout_width="wrap_content" android:layout_height="wrap_content" android:background="@drawable/bg_wa_chip_active" android:paddingHorizontal="16dp" android:paddingVertical="6dp" android:text="All" android:textColor="#25D366" android:textSize="13sp" android:textStyle="bold" />
-                    <TextView android:id="@+id/chipOnline" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginStart="8dp" android:background="@drawable/bg_wa_chip" android:paddingHorizontal="16dp" android:paddingVertical="6dp" android:text="Online" android:textColor="#8696A0" android:textSize="13sp" />
-                    <TextView android:id="@+id/chipGroups" android:layout_width="wrap_content" android:layout_height="wrap_content" android:visibility="gone" />
+            <!-- CHATS TAB -->
+            <LinearLayout
+                android:id="@+id/chatsContainer"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:orientation="vertical">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal"
+                    android:paddingHorizontal="16dp"
+                    android:paddingVertical="10dp">
+
+                    <TextView
+                        android:id="@+id/chipAll"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:background="@drawable/bg_wa_chip_active"
+                        android:paddingHorizontal="14dp"
+                        android:paddingVertical="6dp"
+                        android:text="All"
+                        android:textColor="#25D366"
+                        android:textSize="13sp"
+                        android:textStyle="bold" />
+
+                    <TextView
+                        android:id="@+id/chipUnread"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginStart="8dp"
+                        android:background="@drawable/bg_wa_chip"
+                        android:paddingHorizontal="14dp"
+                        android:paddingVertical="6dp"
+                        android:text="Unread"
+                        android:textColor="#8696A0"
+                        android:textSize="13sp" />
+
+                    <TextView
+                        android:id="@+id/chipOnline"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginStart="8dp"
+                        android:background="@drawable/bg_wa_chip"
+                        android:paddingHorizontal="14dp"
+                        android:paddingVertical="6dp"
+                        android:text="Online"
+                        android:textColor="#8696A0"
+                        android:textSize="13sp" />
+
+                    <TextView
+                        android:id="@+id/chipGroups"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginStart="8dp"
+                        android:background="@drawable/bg_wa_chip"
+                        android:paddingHorizontal="14dp"
+                        android:paddingVertical="6dp"
+                        android:text="Groups"
+                        android:textColor="#8696A0"
+                        android:textSize="13sp" />
                 </LinearLayout>
 
                 <FrameLayout android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1">
-                    <androidx.recyclerview.widget.RecyclerView android:id="@+id/rvChats" android:layout_width="match_parent" android:layout_height="match_parent" />
+                    <androidx.recyclerview.widget.RecyclerView
+                        android:id="@+id/rvChats"
+                        android:layout_width="match_parent"
+                        android:layout_height="match_parent" />
+
                     <TextView
                         android:id="@+id/tvEmptyChats"
                         android:layout_width="wrap_content"
@@ -74,24 +151,88 @@
                 </FrameLayout>
             </LinearLayout>
 
-            <LinearLayout android:id="@+id/statusContainer" android:layout_width="match_parent" android:layout_height="match_parent" android:orientation="vertical" android:visibility="gone">
-                <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:paddingHorizontal="16dp" android:paddingTop="12dp" android:paddingBottom="6dp" android:text="Status" android:textColor="#E9EDEF" android:textSize="19sp" android:textStyle="bold" />
-                <LinearLayout android:id="@+id/btnMyStatus" android:layout_width="match_parent" android:layout_height="74dp" android:background="?attr/selectableItemBackground" android:gravity="center_vertical" android:paddingHorizontal="16dp">
+            <!-- UPDATES (STATUS) TAB -->
+            <LinearLayout
+                android:id="@+id/statusContainer"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:orientation="vertical"
+                android:visibility="gone">
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:paddingHorizontal="16dp"
+                    android:paddingTop="12dp"
+                    android:paddingBottom="6dp"
+                    android:text="Status"
+                    android:textColor="#E9EDEF"
+                    android:textSize="19sp"
+                    android:textStyle="bold" />
+
+                <LinearLayout
+                    android:id="@+id/btnMyStatus"
+                    android:layout_width="match_parent"
+                    android:layout_height="74dp"
+                    android:background="?attr/selectableItemBackground"
+                    android:gravity="center_vertical"
+                    android:paddingHorizontal="16dp">
+
                     <FrameLayout android:layout_width="52dp" android:layout_height="52dp">
-                        <com.google.android.material.imageview.ShapeableImageView android:id="@+id/ivMyStatusAvatar" android:layout_width="match_parent" android:layout_height="match_parent" android:background="#202C33" android:padding="13dp" android:src="@drawable/ic_camera" app:shapeAppearanceOverlay="@style/CircleImage" />
-                        <TextView android:layout_width="21dp" android:layout_height="21dp" android:layout_gravity="bottom|end" android:background="@drawable/bg_wa_unread" android:gravity="center" android:text="+" android:textColor="#0B141A" android:textStyle="bold" />
+                        <com.google.android.material.imageview.ShapeableImageView
+                            android:id="@+id/ivMyStatusAvatar"
+                            android:layout_width="match_parent"
+                            android:layout_height="match_parent"
+                            android:background="#202C33"
+                            android:padding="13dp"
+                            android:src="@drawable/ic_camera"
+                            app:shapeAppearanceOverlay="@style/CircleImage" />
+                        <TextView
+                            android:layout_width="21dp"
+                            android:layout_height="21dp"
+                            android:layout_gravity="bottom|end"
+                            android:background="@drawable/bg_wa_unread"
+                            android:gravity="center"
+                            android:text="+"
+                            android:textColor="#0B141A"
+                            android:textStyle="bold" />
                     </FrameLayout>
-                    <LinearLayout android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginStart="14dp" android:orientation="vertical">
+
+                    <LinearLayout
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginStart="14dp"
+                        android:orientation="vertical">
                         <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="My status" android:textColor="#E9EDEF" android:textSize="16sp" android:textStyle="bold" />
                         <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Tap to add status update" android:textColor="#8696A0" android:textSize="13sp" />
                     </LinearLayout>
                 </LinearLayout>
-                <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:paddingHorizontal="16dp" android:paddingVertical="8dp" android:text="Recent updates" android:textColor="#8696A0" android:textSize="13sp" android:textStyle="bold" />
-                <androidx.recyclerview.widget.RecyclerView android:id="@+id/rvStatuses" android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1" />
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:paddingHorizontal="16dp"
+                    android:paddingVertical="8dp"
+                    android:text="Recent updates"
+                    android:textColor="#8696A0"
+                    android:textSize="13sp"
+                    android:textStyle="bold" />
+
+                <androidx.recyclerview.widget.RecyclerView
+                    android:id="@+id/rvStatuses"
+                    android:layout_width="match_parent"
+                    android:layout_height="0dp"
+                    android:layout_weight="1" />
             </LinearLayout>
 
-            <androidx.recyclerview.widget.RecyclerView android:id="@+id/rvCalls" android:layout_width="match_parent" android:layout_height="match_parent" android:visibility="gone" />
+            <!-- CALLS TAB -->
+            <androidx.recyclerview.widget.RecyclerView
+                android:id="@+id/rvCalls"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:visibility="gone" />
 
+            <!-- FAB -->
             <ImageButton
                 android:id="@+id/fabAction"
                 android:layout_width="58dp"
@@ -105,6 +246,7 @@
         </FrameLayout>
 
         <View android:layout_width="match_parent" android:layout_height="0.6dp" android:background="#182229" />
+
         <com.google.android.material.bottomnavigation.BottomNavigationView
             android:id="@+id/bottomNav"
             android:layout_width="match_parent"
@@ -116,9 +258,17 @@
             app:menu="@menu/bottom_nav_menu" />
     </LinearLayout>
 
-    <FrameLayout android:id="@+id/statusViewerOverlay" android:layout_width="match_parent" android:layout_height="match_parent" android:background="#000000" android:visibility="gone">
+    <!-- Fullscreen Status Story Viewer -->
+    <FrameLayout
+        android:id="@+id/statusViewerOverlay"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="#000000"
+        android:visibility="gone">
+
         <ImageView android:id="@+id/ivStoryFull" android:layout_width="match_parent" android:layout_height="match_parent" android:scaleType="fitCenter" android:visibility="gone" />
         <TextView android:id="@+id/tvStoryTextFull" android:layout_width="match_parent" android:layout_height="match_parent" android:background="#005C4B" android:gravity="center" android:padding="32dp" android:textColor="#FFFFFF" android:textSize="26sp" android:textStyle="bold" android:visibility="gone" />
+
         <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:background="#66000000" android:orientation="vertical" android:padding="12dp">
             <ProgressBar android:id="@+id/storyProgress" style="?android:attr/progressBarStyleHorizontal" android:layout_width="match_parent" android:layout_height="3dp" android:max="100" android:progressBackgroundTint="#4DFFFFFF" android:progressTint="#FFFFFF" />
             <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="10dp" android:gravity="center_vertical">
@@ -131,17 +281,52 @@
         </LinearLayout>
     </FrameLayout>
 
-    <FrameLayout android:id="@+id/incomingOverlay" android:layout_width="match_parent" android:layout_height="match_parent" android:background="@drawable/bg_wa_call_bg" android:visibility="gone">
-        <LinearLayout android:layout_width="match_parent" android:layout_height="match_parent" android:gravity="center_horizontal" android:orientation="vertical" android:paddingTop="84dp">
-            <TextView android:id="@+id/tvCallType" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="WhatsApp voice call" android:textColor="#25D366" android:textSize="14sp" />
-            <TextView android:id="@+id/tvCallerName" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="8dp" android:text="Friend" android:textColor="#FFFFFF" android:textSize="28sp" android:textStyle="bold" />
-            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="4dp" android:text="🔒 End-to-end encrypted" android:textColor="#8696A0" android:textSize="12.5sp" />
-            <TextView android:layout_width="130dp" android:layout_height="130dp" android:layout_marginTop="54dp" android:background="@drawable/bg_wa_circle_gray" android:gravity="center" android:text="👤" android:textSize="58sp" />
+    <!-- WhatsApp Incoming Call Overlay -->
+    <FrameLayout
+        android:id="@+id/incomingOverlay"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="@drawable/bg_wa_call_bg"
+        android:visibility="gone">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:gravity="center_horizontal"
+            android:orientation="vertical"
+            android:paddingTop="84dp">
+
+            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="🔒 End-to-end encrypted" android:textColor="#8696A0" android:textSize="12sp" />
+            <TextView android:id="@+id/tvCallerName" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="12dp" android:text="Friend" android:textColor="#FFFFFF" android:textSize="28sp" android:textStyle="bold" />
+            <TextView android:id="@+id/tvCallType" android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="6dp" android:text="WhatsApp voice call" android:textColor="#25D366" android:textSize="14.5sp" />
+
+            <ImageView
+                android:layout_width="136dp"
+                android:layout_height="136dp"
+                android:layout_marginTop="52dp"
+                android:background="@drawable/bg_wa_circle_gray"
+                android:padding="32dp"
+                android:src="@drawable/ic_person" />
+
             <View android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1" />
-            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginBottom="60dp" android:gravity="center">
-                <ImageButton android:id="@+id/btnRejectCall" android:layout_width="70dp" android:layout_height="70dp" android:background="@drawable/bg_wa_circle_green" android:backgroundTint="#EF4444" android:src="@drawable/ic_call_end" />
-                <ImageButton android:id="@+id/btnAcceptCall" android:layout_width="70dp" android:layout_height="70dp" android:layout_marginStart="80dp" android:background="@drawable/bg_wa_circle_green" android:backgroundTint="#25D366" android:src="@drawable/ic_calls" />
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginBottom="56dp"
+                android:gravity="center">
+
+                <LinearLayout android:layout_width="wrap_content" android:layout_height="wrap_content" android:gravity="center" android:orientation="vertical">
+                    <ImageButton android:id="@+id/btnRejectCall" android:layout_width="68dp" android:layout_height="68dp" android:background="@drawable/bg_wa_circle_green" android:backgroundTint="#EF4444" android:src="@drawable/ic_call_end" />
+                    <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="8dp" android:text="Decline" android:textColor="#E9EDEF" android:textSize="13sp" />
+                </LinearLayout>
+
+                <LinearLayout android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginStart="84dp" android:gravity="center" android:orientation="vertical">
+                    <ImageButton android:id="@+id/btnAcceptCall" android:layout_width="68dp" android:layout_height="68dp" android:background="@drawable/bg_wa_circle_green" android:backgroundTint="#25D366" android:src="@drawable/ic_calls" />
+                    <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="8dp" android:text="Accept" android:textColor="#E9EDEF" android:textSize="13sp" />
+                </LinearLayout>
             </LinearLayout>
         </LinearLayout>
     </FrameLayout>
+
 </FrameLayout>
