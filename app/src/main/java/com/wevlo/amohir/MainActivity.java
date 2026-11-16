@@ -97,6 +97,7 @@ public class MainActivity extends AppCompatActivity {
     private String currentFilter = "all";
     private boolean isPickingAvatar = false;
     private Uri cameraStatusUri;
+    private ListenerRegistration updateListener;
     private final Handler storyHandler = new Handler(Looper.getMainLooper());
     private Runnable storyRunnable;
 
@@ -221,7 +222,20 @@ public class MainActivity extends AppCompatActivity {
         tvStoryTime = findViewById(R.id.tvStoryTime);
         storyProgress = findViewById(R.id.storyProgress);
 
-        userAdapter = new UserAdapter(filteredUsers, user -> openPrivateChat(user.getUid(), user.getName(), user.getAvatarBase64()));
+        userAdapter = new UserAdapter(filteredUsers, new UserAdapter.OnUserClickListener() {
+            @Override
+            public void onUserClick(UserModel user) {
+                openPrivateChat(user.getUid(), user.getName(), user.getAvatarBase64(), null);
+            }
+
+            @Override
+            public void onAvatarClick(UserModel user) {
+                ContactInfoDialog.show(MainActivity.this, user.getUid(), user.getName(), new ContactInfoDialog.ActionCallback() {
+                    @Override public void onAudioCall() { openPrivateChat(user.getUid(), user.getName(), user.getAvatarBase64(), "audio"); }
+                    @Override public void onVideoCall() { openPrivateChat(user.getUid(), user.getName(), user.getAvatarBase64(), "video"); }
+                });
+            }
+        });
         rvChats.setLayoutManager(new LinearLayoutManager(this));
         rvChats.setAdapter(userAdapter);
 
@@ -311,6 +325,7 @@ public class MainActivity extends AppCompatActivity {
 
     private void startPrivateListeners() {
         saveProfileToPrefsAndFirestore();
+        updateListener = AutoUpdater.listenForUpdates(this);
         listenPrivateContacts();
         listenPrivateChats();
         listenPrivateStatuses();
@@ -470,14 +485,15 @@ public class MainActivity extends AppCompatActivity {
         db.collection("users").document(myPhone).collection("contacts").document(friendPhone).set(contact);
 
         attachPeerListener(friendPhone);
-        openPrivateChat(friendPhone, friendName, friendAvatar);
+        openPrivateChat(friendPhone, friendName, friendAvatar, null);
     }
 
-    private void openPrivateChat(String peerPhone, String peerName, String peerAvatar) {
+    private void openPrivateChat(String peerPhone, String peerName, String peerAvatar, String autoStartCall) {
         Intent i = new Intent(MainActivity.this, ChatActivity.class);
         i.putExtra("peerUid", peerPhone);
         i.putExtra("peerName", peerName);
         i.putExtra("peerAvatar", peerAvatar);
+        if (autoStartCall != null) i.putExtra("autoStartCall", autoStartCall);
         startActivity(i);
     }
 
@@ -672,11 +688,8 @@ public class MainActivity extends AppCompatActivity {
 
     private void postStatusToFirestore(String text, String imageBase64) {
         Map<String, Object> map = new HashMap<>();
-        map.put("uid", myPhone);
-        map.put("userName", myName);
-        map.put("text", text);
-        map.put("imageBase64", imageBase64);
-        map.put("timestamp", System.currentTimeMillis());
+        map.put("uid", myPhone); map.put("userName", myName); map.put("text", text);
+        map.put("imageBase64", imageBase64); map.put("timestamp", System.currentTimeMillis());
         db.collection("statuses").add(map).addOnSuccessListener(r -> Toast.makeText(this, "Status posted!", Toast.LENGTH_SHORT).show());
     }
 
@@ -696,20 +709,17 @@ public class MainActivity extends AppCompatActivity {
 
     @Override protected void onResume() {
         super.onResume();
-        if (myPhone != null && !myPhone.isEmpty()) {
-            db.collection("users").document(myPhone).update("online", true, "lastSeen", System.currentTimeMillis());
-        }
+        if (myPhone != null && !myPhone.isEmpty()) db.collection("users").document(myPhone).update("online", true, "lastSeen", System.currentTimeMillis());
     }
 
     @Override protected void onPause() {
         super.onPause();
-        if (myPhone != null && !myPhone.isEmpty()) {
-            db.collection("users").document(myPhone).update("online", false, "lastSeen", System.currentTimeMillis());
-        }
+        if (myPhone != null && !myPhone.isEmpty()) db.collection("users").document(myPhone).update("online", false, "lastSeen", System.currentTimeMillis());
     }
 
     @Override protected void onDestroy() {
         super.onDestroy();
+        if (updateListener != null) updateListener.remove();
         if (storyRunnable != null) storyHandler.removeCallbacks(storyRunnable);
         for (ListenerRegistration r : peerListeners.values()) r.remove();
     }
