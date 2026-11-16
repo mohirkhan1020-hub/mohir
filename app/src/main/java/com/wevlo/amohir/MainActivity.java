@@ -52,8 +52,13 @@ import com.google.firebase.firestore.ListenerRegistration;
 import com.google.firebase.firestore.Query;
 import com.google.firebase.firestore.SetOptions;
 
+import org.json.JSONArray;
+import org.json.JSONObject;
+
 import java.io.ByteArrayOutputStream;
 import java.io.File;
+import java.io.FileInputStream;
+import java.io.FileOutputStream;
 import java.io.InputStream;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
@@ -208,13 +213,6 @@ public class MainActivity extends AppCompatActivity {
                 try { startActivity(new Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, Uri.parse("package:" + getPackageName()))); } catch (Exception ignored) {}
             }
         }
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE && !prefs.getBoolean("fsi_asked", false)) {
-            NotificationManager nm = getSystemService(NotificationManager.class);
-            if (nm != null && !nm.canUseFullScreenIntent()) {
-                prefs.edit().putBoolean("fsi_asked", true).apply();
-                try { startActivity(new Intent(Settings.ACTION_MANAGE_APP_USE_FULL_SCREEN_INTENT, Uri.parse("package:" + getPackageName()))); } catch (Exception ignored) {}
-            }
-        }
     }
 
     private void initViews() {
@@ -244,6 +242,9 @@ public class MainActivity extends AppCompatActivity {
                     @Override public void onAudioCall() { openPrivateChat(user.getUid(), user.getName(), user.getAvatarBase64(), "audio"); }
                     @Override public void onVideoCall() { openPrivateChat(user.getUid(), user.getName(), user.getAvatarBase64(), "video"); }
                 });
+            }
+            @Override public void onUserLongClick(UserModel user) {
+                showChatOptionsDialog(user);
             }
         });
         rvChats.setLayoutManager(new LinearLayoutManager(this)); rvChats.setAdapter(userAdapter);
@@ -290,6 +291,34 @@ public class MainActivity extends AppCompatActivity {
             if (bottomNav.getSelectedItemId() == R.id.nav_updates) showAddStatusDialog();
             else showFindUserByPhoneDialog();
         });
+    }
+
+    private void showChatOptionsDialog(UserModel user) {
+        SharedPreferences prefs = getSharedPreferences("DivineWA", MODE_PRIVATE);
+        boolean isPinned = prefs.getBoolean("pin_" + user.getUid(), false);
+        long mutedUntil = prefs.getLong("mute_" + user.getUid(), 0);
+        boolean isMuted = mutedUntil > System.currentTimeMillis();
+
+        String[] options = {
+                isPinned ? "📌 Unpin Chat" : "📌 Pin Chat",
+                isMuted ? "🔔 Unmute Notifications" : "🔕 Mute Notifications (8 Hours)",
+                "🗑️ Delete Chat"
+        };
+
+        new AlertDialog.Builder(this)
+                .setTitle(user.getName())
+                .setItems(options, (d, which) -> {
+                    if (which == 0) {
+                        prefs.edit().putBoolean("pin_" + user.getUid(), !isPinned).apply();
+                        applyFilters();
+                    } else if (which == 1) {
+                        prefs.edit().putLong("mute_" + user.getUid(), isMuted ? 0 : System.currentTimeMillis() + (8 * 3600 * 1000L)).apply();
+                        applyFilters();
+                    } else {
+                        String cId = user.isGlobalRoom() ? user.getUid() : (myPhone.compareTo(user.getUid()) < 0 ? myPhone + "_" + user.getUid() : user.getUid() + "_" + myPhone);
+                        db.collection("chats").document(cId).delete();
+                    }
+                }).show();
     }
 
     private void selectChip(String chip) {
@@ -403,16 +432,25 @@ public class MainActivity extends AppCompatActivity {
 
     private void applyFilters() {
         filteredUsers.clear();
+        SharedPreferences prefs = getSharedPreferences("DivineWA", MODE_PRIVATE);
         String query = etSearch.getText().toString().toLowerCase().trim();
         List<UserModel> combined = new ArrayList<>();
+
         for (UserModel u : peerUsersMap.values()) {
             if (lastMsgMap.containsKey(u.getUid())) u.setLastMessage(lastMsgMap.get(u.getUid()));
             if (lastTimeMap.containsKey(u.getUid())) u.setLastMsgTime(lastTimeMap.get(u.getUid()));
             Integer un = unreadMap.get(u.getUid());
             u.setUnreadCount(un != null ? un : 0);
+            u.setPinned(prefs.getBoolean("pin_" + u.getUid(), false));
+            u.setMutedUntil(prefs.getLong("mute_" + u.getUid(), 0));
             combined.add(u);
         }
-        combined.addAll(groupChatsMap.values());
+
+        for (UserModel g : groupChatsMap.values()) {
+            g.setPinned(prefs.getBoolean("pin_" + g.getUid(), false));
+            g.setMutedUntil(prefs.getLong("mute_" + g.getUid(), 0));
+            combined.add(g);
+        }
 
         for (UserModel u : combined) {
             boolean matchesQuery = query.isEmpty()
@@ -424,7 +462,13 @@ public class MainActivity extends AppCompatActivity {
                     || ("groups".equals(currentFilter) && u.isGlobalRoom());
             if (matchesQuery && matchesChip) filteredUsers.add(u);
         }
-        Collections.sort(filteredUsers, (a, b) -> Long.compare(b.getLastMsgTime(), a.getLastMsgTime()));
+
+        // Pinned চ্যাটগুলো সবার ওপরে থাকবে
+        Collections.sort(filteredUsers, (a, b) -> {
+            if (a.isPinned() != b.isPinned()) return a.isPinned() ? -1 : 1;
+            return Long.compare(b.getLastMsgTime(), a.getLastMsgTime());
+        });
+
         userAdapter.notifyDataSetChanged();
         tvEmptyChats.setVisibility(filteredUsers.isEmpty() ? View.VISIBLE : View.GONE);
     }
@@ -562,23 +606,76 @@ public class MainActivity extends AppCompatActivity {
         NotificationManager nm = getSystemService(NotificationManager.class); if (nm != null) nm.cancel(2002);
     }
 
+    /* 💾 Local Chat Backup & Restore */
+    private void backupChatsToLocalFile() {
+        Toast.makeText(this, "Backing up chats...", Toast.LENGTH_SHORT).show();
+        db.collection("chats").whereArrayContains("participants", myPhone).get().addOnSuccessListener(snaps -> {
+            JSONArray arr = new JSONArray();
+            for (DocumentSnapshot d : snaps.getDocuments()) {
+                JSONObject obj = new JSONObject(d.getData());
+                arr.put(obj);
+            }
+            try {
+                File f = new File(getExternalFilesDir(null), "whatsapp_chats_backup.json");
+                try (FileOutputStream fos = new FileOutputStream(f)) {
+                    fos.write(arr.toString(2).getBytes());
+                }
+                Toast.makeText(this, "Backup saved to: " + f.getName(), Toast.LENGTH_LONG).show();
+            } catch (Exception e) {
+                Toast.makeText(this, "Backup failed: " + e.getMessage(), Toast.LENGTH_SHORT).show();
+            }
+        });
+    }
+
+    private void restoreChatsFromLocalFile() {
+        File f = new File(getExternalFilesDir(null), "whatsapp_chats_backup.json");
+        if (!f.exists()) {
+            Toast.makeText(this, "No backup file found!", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        try (FileInputStream fis = new FileInputStream(f)) {
+            byte[] buf = new byte[(int) f.length()];
+            fis.read(buf);
+            JSONArray arr = new JSONArray(new String(buf));
+            for (int i = 0; i < arr.length(); i++) {
+                JSONObject obj = arr.getJSONObject(i);
+                Map<String, Object> map = new HashMap<>();
+                for (java.util.Iterator<String> it = obj.keys(); it.hasNext(); ) {
+                    String k = it.next();
+                    map.put(k, obj.get(k));
+                }
+                String cId = obj.optString("groupId", "chat_" + System.currentTimeMillis() + "_" + i);
+                db.collection("chats").document(cId).set(map, SetOptions.merge());
+            }
+            Toast.makeText(this, "Chats restored successfully!", Toast.LENGTH_SHORT).show();
+        } catch (Exception e) {
+            Toast.makeText(this, "Restore error: " + e.getMessage(), Toast.LENGTH_SHORT).show();
+        }
+    }
+
     private void showMainMenuDialog() {
         SharedPreferences prefs = getSharedPreferences("DivineWA", MODE_PRIVATE);
         boolean lockOn = prefs.getBoolean("app_lock_enabled", false);
         String[] items = {
                 "➕ Add Contact by Number",
                 "👥 New Private Group",
+                "⭐ Starred Messages",
                 "🔐 Fingerprint Lock: " + (lockOn ? "ON" : "OFF"),
+                "💾 Backup Chats",
+                "📥 Restore Chats",
                 "⚙️ Profile Settings (" + myPhone + ")",
                 "🚪 Logout / Switch Number"
         };
         new AlertDialog.Builder(this).setItems(items, (d, which) -> {
             if (which == 0) showFindUserByPhoneDialog();
             else if (which == 1) showCreateGroupDialog();
-            else if (which == 2) {
+            else if (which == 2) startActivity(new Intent(this, StarredMessagesActivity.class));
+            else if (which == 3) {
                 prefs.edit().putBoolean("app_lock_enabled", !lockOn).apply();
                 Toast.makeText(this, "Fingerprint Lock " + (!lockOn ? "ON" : "OFF"), Toast.LENGTH_SHORT).show();
-            } else if (which == 3) showProfileSettingsDialog();
+            } else if (which == 4) backupChatsToLocalFile();
+            else if (which == 5) restoreChatsFromLocalFile();
+            else if (which == 6) showProfileSettingsDialog();
             else {
                 stopService(new Intent(this, WhatsAppBgService.class));
                 db.collection("users").document(myPhone).update("online", false, "lastSeen", System.currentTimeMillis());
