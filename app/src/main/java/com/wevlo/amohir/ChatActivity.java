@@ -2,6 +2,7 @@ package com.wevlo.amohir;
 
 import android.Manifest;
 import android.annotation.SuppressLint;
+import android.app.Activity; // <--- এই লাইনটি যোগ করা হয়েছে (Fix)
 import android.app.AlertDialog;
 import android.app.NotificationManager;
 import android.content.ClipData;
@@ -181,7 +182,7 @@ public class ChatActivity extends AppCompatActivity {
 
     private final ActivityResultLauncher<Intent> doodleLauncher =
             registerForActivityResult(new ActivityResultContracts.StartActivityForResult(), result -> {
-                if (result.getResultCode() == RESULT_OK && result.getData() != null) {
+                if (result.getResultCode() == Activity.RESULT_OK && result.getData() != null) { // Fixed RESULT_OK
                     String doodledB64 = result.getData().getStringExtra("doodledB64");
                     if (doodledB64 != null) {
                         sendMessage("", "image", doodledB64, null, null, null, false, false);
@@ -200,7 +201,7 @@ public class ChatActivity extends AppCompatActivity {
 
     private final ActivityResultLauncher<Intent> ringtonePickerLauncher =
             registerForActivityResult(new ActivityResultContracts.StartActivityForResult(), result -> {
-                if (result.getResultCode() == RESULT_OK && result.getData() != null) {
+                if (result.getResultCode() == Activity.RESULT_OK && result.getData() != null) { // Fixed RESULT_OK
                     Uri uri = result.getData().getParcelableExtra(RingtoneManager.EXTRA_RINGTONE_PICKED_URI);
                     if (uri != null) {
                         getSharedPreferences("DivineWA", MODE_PRIVATE).edit().putString("ring_" + peerUid, uri.toString()).apply();
@@ -1360,7 +1361,7 @@ public class ChatActivity extends AppCompatActivity {
     }
 
     @Override protected void onStart() { super.onStart(); isChatOpen = true; }
-    @Override protected void onStop() { super.onStop(); isChatOpen = false; }
+    @Override protected void onStop() { isChatOpen = false; }
 
     @Override
     protected void onDestroy() {
