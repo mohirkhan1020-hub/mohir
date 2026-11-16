@@ -35,6 +35,8 @@ import androidx.activity.result.ActivityResultLauncher;
 import androidx.activity.result.contract.ActivityResultContracts;
 import androidx.annotation.NonNull;
 import androidx.appcompat.app.AppCompatActivity;
+import androidx.biometric.BiometricManager;
+import androidx.biometric.BiometricPrompt;
 import androidx.core.content.ContextCompat;
 import androidx.core.content.FileProvider;
 import androidx.recyclerview.widget.LinearLayoutManager;
@@ -146,8 +148,34 @@ public class MainActivity extends AppCompatActivity {
         initFirebase();
         initViews();
 
-        // LOCK logic is completely removed. Direct entry to app.
-        proceedAfterUnlock();
+        if (prefs.getBoolean("app_lock_enabled", false)) {
+            chatsContainer.setVisibility(View.INVISIBLE);
+            showBiometricLock();
+        } else {
+            proceedAfterUnlock();
+        }
+    }
+
+    private void showBiometricLock() {
+        BiometricPrompt prompt = new BiometricPrompt(this, ContextCompat.getMainExecutor(this),
+                new BiometricPrompt.AuthenticationCallback() {
+                    @Override public void onAuthenticationSucceeded(@NonNull BiometricPrompt.AuthenticationResult result) {
+                        chatsContainer.setVisibility(View.VISIBLE);
+                        proceedAfterUnlock();
+                    }
+                    @Override public void onAuthenticationError(int errorCode, @NonNull CharSequence errString) {
+                        Toast.makeText(MainActivity.this, "Authentication required", Toast.LENGTH_SHORT).show();
+                        finish();
+                    }
+                });
+        BiometricPrompt.PromptInfo.Builder b = new BiometricPrompt.PromptInfo.Builder()
+                .setTitle("WhatsApp Locked").setSubtitle("Unlock with Fingerprint or PIN");
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            b.setAllowedAuthenticators(BiometricManager.Authenticators.BIOMETRIC_WEAK | BiometricManager.Authenticators.DEVICE_CREDENTIAL);
+        } else {
+            b.setAllowedAuthenticators(BiometricManager.Authenticators.BIOMETRIC_WEAK).setNegativeButtonText("Exit");
+        }
+        prompt.authenticate(b.build());
     }
 
     private void proceedAfterUnlock() {
@@ -609,7 +637,7 @@ public class MainActivity extends AppCompatActivity {
             byte[] buf = new byte[(int) f.length()];
             fis.read(buf);
             JSONArray arr = new JSONArray(new String(buf));
-            for (int i = 0; i < arr.length; i++) {
+            for (int i = 0; i < arr.length(); i++) {
                 JSONObject obj = arr.getJSONObject(i);
                 Map<String, Object> map = new HashMap<>();
                 for (java.util.Iterator<String> it = obj.keys(); it.hasNext(); ) {
