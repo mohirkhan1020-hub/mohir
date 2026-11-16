@@ -2,7 +2,6 @@ package com.wevlo.amohir;
 
 import android.Manifest;
 import android.annotation.SuppressLint;
-import android.app.Activity;
 import android.app.AlertDialog;
 import android.app.NotificationManager;
 import android.content.ClipData;
@@ -430,6 +429,48 @@ public class ChatActivity extends AppCompatActivity {
         btnSpeaker.setOnClickListener(v -> showAudioOutputChooserOrToggle());
     }
 
+    public void onScreenShareButtonClick() {
+        if (!"video".equals(activeCallType)) {
+            Toast.makeText(this, "স্ক্রিন শেয়ার করার জন্য Video Call দিন", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        if (webRTCManager.isScreenSharing()) {
+            webRTCManager.stopScreenShare();
+            stopService(new Intent(this, ScreenShareService.class));
+            btnScreenShare.clearColorFilter();
+            Toast.makeText(this, "Screen sharing stopped", Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        String[] opts = {"📱 Share My Screen (আমার স্ক্রিন দেখাও)", "📲 Request Friend's Screen (অন্য ফোনের স্ক্রিন দেখো)"};
+        new AlertDialog.Builder(this).setTitle("Screen Share").setItems(opts, (d, which) -> {
+            if (which == 0) launchMyScreenSharePrompt();
+            else {
+                Map<String, Object> req = new HashMap<>();
+                req.put("screenRequestTarget", peerUid);
+                req.put("screenRequestTime", System.currentTimeMillis());
+                db.collection("calls").document(callDocId).set(req, SetOptions.merge());
+                Toast.makeText(this, "অন্য ফোনে স্ক্রিন শেয়ার পপআপ পাঠানো হয়েছে!", Toast.LENGTH_SHORT).show();
+            }
+        }).show();
+    }
+
+    public void handleRemoteScreenRequest(DocumentSnapshot snap) {
+        String target = snap.getString("screenRequestTarget");
+        Long reqTime = snap.getLong("screenRequestTime");
+        if (myUid.equals(target) && reqTime != null && reqTime > lastScreenReqTime
+                && callOverlay != null && callOverlay.getVisibility() == View.VISIBLE
+                && webRTCManager != null && !webRTCManager.isScreenSharing()) {
+            lastScreenReqTime = reqTime;
+            launchMyScreenSharePrompt();
+        }
+    }
+
+    private void launchMyScreenSharePrompt() {
+        MediaProjectionManager mpm = (MediaProjectionManager) getSystemService(Context.MEDIA_PROJECTION_SERVICE);
+        if (mpm != null) screenShareLauncher.launch(mpm.createScreenCaptureIntent());
+    }
+
     private void showImageSendOptions(Uri imageUri) {
         String[] opts = {"Send Normal Photo", "Send View Once (① একবার দেখার ছবি)", "✏️ Doodle / Draw on Photo"};
         new AlertDialog.Builder(this).setTitle("Photo Options").setItems(opts, (d, which) -> {
@@ -643,7 +684,6 @@ public class ChatActivity extends AppCompatActivity {
                         MessageModel m = dc.getDocument().toObject(MessageModel.class);
                         m.setId(dc.getDocument().getId());
 
-                        // Disappearing Messages অটো মুছে ফেলা
                         if (m.getExpireAt() > 0 && now > m.getExpireAt()) {
                             dc.getDocument().getReference().delete();
                             continue;
@@ -651,7 +691,6 @@ public class ChatActivity extends AppCompatActivity {
 
                         if (dc.getType() == DocumentChange.Type.ADDED) {
                             allMessages.add(m);
-                            // Read receipts (নীল টিক অন থাকলে)
                             boolean readReceiptsOn = getSharedPreferences("DivineWA", MODE_PRIVATE).getBoolean("read_receipts", true);
                             if (!myUid.equals(m.getSenderId()) && !m.isSeen() && readReceiptsOn) {
                                 dc.getDocument().getReference().update("seen", true);
@@ -669,7 +708,7 @@ public class ChatActivity extends AppCompatActivity {
     }
 
     private void sendMessage(String text, String type, String mediaUrl, String voiceDuration, String fileName, String latLng, boolean forwarded, boolean viewOnce) {
-        if (iBlockedPeer || peerBlockedMe) return;
+        if (!isGroup && (iBlockedPeer || peerBlockedMe)) return;
         long now = System.currentTimeMillis();
         long disappearTimer = getSharedPreferences("DivineWA", MODE_PRIVATE).getLong("disappear_" + chatId, 0);
 
