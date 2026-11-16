@@ -1,6 +1,8 @@
 package com.wevlo.amohir;
 
 import android.content.Context;
+import android.content.Intent;
+import android.media.projection.MediaProjection;
 
 import org.webrtc.AudioSource;
 import org.webrtc.AudioTrack;
@@ -22,10 +24,12 @@ import org.webrtc.RtpParameters;
 import org.webrtc.RtpReceiver;
 import org.webrtc.RtpSender;
 import org.webrtc.RtpTransceiver;
+import org.webrtc.ScreenCapturerAndroid;
 import org.webrtc.SdpObserver;
 import org.webrtc.SessionDescription;
 import org.webrtc.SurfaceTextureHelper;
 import org.webrtc.SurfaceViewRenderer;
+import org.webrtc.VideoCapturer;
 import org.webrtc.VideoSource;
 import org.webrtc.VideoTrack;
 import org.webrtc.audio.AudioDeviceModule;
@@ -44,6 +48,7 @@ public class WebRTCManager {
         void onIceCandidateGenerated(IceCandidate candidate);
         void onRemoteStreamAdded(VideoTrack videoTrack);
         void onConnectionStateChanged(PeerConnection.PeerConnectionState state);
+        void onScreenShareStopped();
         void onError(String message);
     }
 
@@ -58,14 +63,22 @@ public class WebRTCManager {
     private final PeerConnectionFactory factory;
 
     private PeerConnection peerConnection;
+    private RtpSender videoSender;
     private AudioSource audioSource;
     private AudioTrack localAudioTrack;
+
     private VideoSource videoSource;
     private VideoTrack localVideoTrack;
     private CameraVideoCapturer videoCapturer;
     private SurfaceTextureHelper surfaceTextureHelper;
-    private SurfaceViewRenderer localViewRef;
 
+    private VideoCapturer screenCapturer;
+    private SurfaceTextureHelper screenSurfaceHelper;
+    private VideoSource screenVideoSource;
+    private VideoTrack screenVideoTrack;
+    private boolean isScreenSharing = false;
+
+    private SurfaceViewRenderer localViewRef;
     private boolean isVideoCall = true;
     private boolean isRemoteSdpSet = false;
     private final List<IceCandidate> pendingIceCandidates = new ArrayList<>();
@@ -105,25 +118,24 @@ public class WebRTCManager {
         localAudioTrack = factory.createAudioTrack("ARDAMSa0", audioSource);
         localAudioTrack.setEnabled(true);
 
-        if (isVideo) {
-            videoCapturer = createCameraCapturer();
-            if (videoCapturer != null) {
-                surfaceTextureHelper = SurfaceTextureHelper.create("CaptureThread", eglBase.getEglBaseContext());
-                videoSource = factory.createVideoSource(videoCapturer.isScreencast());
-                videoCapturer.initialize(surfaceTextureHelper, context, videoSource.getCapturerObserver());
-                try {
-                    videoCapturer.startCapture(1280, 720, 30);
-                } catch (Exception e) {
-                    try { videoCapturer.startCapture(640, 480, 30); } catch (Exception ignored) {}
-                }
+        if (isVideo) startCameraInternal(localView);
+    }
 
-                localView.setMirror(true);
-                localVideoTrack = factory.createVideoTrack("ARDAMSv0", videoSource);
-                localVideoTrack.setEnabled(true);
-                localVideoTrack.addSink(localView);
-            } else {
-                callback.onError("No camera found");
+    private void startCameraInternal(SurfaceViewRenderer localView) {
+        videoCapturer = createCameraCapturer();
+        if (videoCapturer != null) {
+            surfaceTextureHelper = SurfaceTextureHelper.create("CaptureThread", eglBase.getEglBaseContext());
+            videoSource = factory.createVideoSource(false);
+            videoCapturer.initialize(surfaceTextureHelper, context, videoSource.getCapturerObserver());
+            try {
+                videoCapturer.startCapture(1280, 720, 30);
+            } catch (Exception e) {
+                try { videoCapturer.startCapture(640, 480, 30); } catch (Exception ignored) {}
             }
+            if (localView != null) localView.setMirror(true);
+            localVideoTrack = factory.createVideoTrack("ARDAMSv0", videoSource);
+            localVideoTrack.setEnabled(true);
+            if (localView != null) localVideoTrack.addSink(localView);
         }
     }
 
@@ -192,19 +204,90 @@ public class WebRTCManager {
             List<String> streamIds = Collections.singletonList("ARDAMS");
             if (localAudioTrack != null) peerConnection.addTrack(localAudioTrack, streamIds);
             if (localVideoTrack != null) {
-                RtpSender videoSender = peerConnection.addTrack(localVideoTrack, streamIds);
-                if (videoSender != null) {
-                    RtpParameters params = videoSender.getParameters();
-                    for (RtpParameters.Encoding enc : params.encodings) {
-                        enc.maxBitrateBps = 2_000_000;
-                        enc.minBitrateBps = 500_000;
-                        enc.maxFramerate = 30;
-                    }
-                    params.degradationPreference = RtpParameters.DegradationPreference.MAINTAIN_RESOLUTION;
-                    videoSender.setParameters(params);
-                }
+                videoSender = peerConnection.addTrack(localVideoTrack, streamIds);
+                applyHighQualityVideoParams();
             }
         }
+    }
+
+    private void applyHighQualityVideoParams() {
+        if (videoSender == null) return;
+        RtpParameters params = videoSender.getParameters();
+        for (RtpParameters.Encoding enc : params.encodings) {
+            enc.maxBitrateBps = 2_000_000;
+            enc.minBitrateBps = 500_000;
+            enc.maxFramerate = 30;
+        }
+        params.degradationPreference = RtpParameters.DegradationPreference.MAINTAIN_RESOLUTION;
+        videoSender.setParameters(params);
+    }
+
+    /* 🖥️ Screen Share শুরু ও বন্ধ */
+    public boolean isScreenSharing() { return isScreenSharing; }
+
+    public void startScreenShare(Intent projectionData, SurfaceViewRenderer localView) {
+        if (videoSender == null || projectionData == null) {
+            callback.onError("Please use Video Call for Screen Share");
+            return;
+        }
+        stopCameraResources();
+        isScreenSharing = true;
+
+        screenCapturer = new ScreenCapturerAndroid(projectionData, new MediaProjection.Callback() {
+            @Override public void onStop() {
+                if (isScreenSharing) {
+                    stopScreenShare(localView);
+                    callback.onScreenShareStopped();
+                }
+            }
+        });
+        screenSurfaceHelper = SurfaceTextureHelper.create("ScreenThread", eglBase.getEglBaseContext());
+        screenVideoSource = factory.createVideoSource(true);
+        screenCapturer.initialize(screenSurfaceHelper, context, screenVideoSource.getCapturerObserver());
+        screenCapturer.startCapture(720, 1280, 15);
+
+        screenVideoTrack = factory.createVideoTrack("ARDAMSs0", screenVideoSource);
+        screenVideoTrack.setEnabled(true);
+        if (localView != null) {
+            localView.setMirror(false);
+            screenVideoTrack.addSink(localView);
+        }
+        videoSender.setTrack(screenVideoTrack, false);
+        applyHighQualityVideoParams();
+    }
+
+    public void stopScreenShare(SurfaceViewRenderer localView) {
+        if (!isScreenSharing) return;
+        isScreenSharing = false;
+        stopScreenResources();
+
+        startCameraInternal(localView);
+        if (videoSender != null && localVideoTrack != null) {
+            videoSender.setTrack(localVideoTrack, false);
+            applyHighQualityVideoParams();
+        }
+    }
+
+    private void stopCameraResources() {
+        if (localVideoTrack != null && localViewRef != null) localVideoTrack.removeSink(localViewRef);
+        if (videoCapturer != null) {
+            try { videoCapturer.stopCapture(); } catch (InterruptedException ignored) {}
+            videoCapturer.dispose(); videoCapturer = null;
+        }
+        if (surfaceTextureHelper != null) { surfaceTextureHelper.dispose(); surfaceTextureHelper = null; }
+        if (videoSource != null) { videoSource.dispose(); videoSource = null; }
+        localVideoTrack = null;
+    }
+
+    private void stopScreenResources() {
+        if (screenVideoTrack != null && localViewRef != null) screenVideoTrack.removeSink(localViewRef);
+        if (screenCapturer != null) {
+            try { screenCapturer.stopCapture(); } catch (InterruptedException ignored) {}
+            screenCapturer.dispose(); screenCapturer = null;
+        }
+        if (screenSurfaceHelper != null) { screenSurfaceHelper.dispose(); screenSurfaceHelper = null; }
+        if (screenVideoSource != null) { screenVideoSource.dispose(); screenVideoSource = null; }
+        screenVideoTrack = null;
     }
 
     public void createOffer(SdpResultListener listener) {
@@ -268,6 +351,7 @@ public class WebRTCManager {
     public void setCamEnabled(boolean enabled) { if (localVideoTrack != null) localVideoTrack.setEnabled(enabled); }
 
     public void switchCamera() {
+        if (isScreenSharing) return;
         if (videoCapturer != null) {
             videoCapturer.switchCamera(new CameraVideoCapturer.CameraSwitchHandler() {
                 @Override public void onCameraSwitchDone(boolean isFrontCamera) {
@@ -280,15 +364,12 @@ public class WebRTCManager {
 
     public void endCall() {
         synchronized (iceLock) { isRemoteSdpSet = false; pendingIceCandidates.clear(); }
-        if (videoCapturer != null) {
-            try { videoCapturer.stopCapture(); } catch (InterruptedException ignored) {}
-            videoCapturer.dispose(); videoCapturer = null;
-        }
-        if (surfaceTextureHelper != null) { surfaceTextureHelper.dispose(); surfaceTextureHelper = null; }
-        if (videoSource != null) { videoSource.dispose(); videoSource = null; }
+        isScreenSharing = false;
+        stopCameraResources();
+        stopScreenResources();
         if (audioSource != null) { audioSource.dispose(); audioSource = null; }
         if (peerConnection != null) { peerConnection.close(); peerConnection = null; }
-        localAudioTrack = null; localVideoTrack = null; localViewRef = null;
+        videoSender = null; localAudioTrack = null; localViewRef = null;
     }
 
     public void destroyFactory() {
