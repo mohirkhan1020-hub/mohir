@@ -1,5 +1,6 @@
 package com.wevlo.amohir;
 
+import android.app.AlarmManager;
 import android.app.Notification;
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
@@ -10,9 +11,9 @@ import android.content.pm.ServiceInfo;
 import android.media.AudioAttributes;
 import android.media.Ringtone;
 import android.media.RingtoneManager;
-import android.net.Uri;
 import android.os.Build;
 import android.os.IBinder;
+import android.os.PowerManager;
 
 import androidx.annotation.Nullable;
 import androidx.core.app.NotificationCompat;
@@ -40,14 +41,13 @@ public class WhatsAppBgService extends Service {
     private FirebaseFirestore db;
     private String myPhone;
     private ListenerRegistration callListener, chatListener;
-    private long serviceStartTime;
+    private boolean chatsInitialized = false;
     private final Map<String, Long> lastNotifiedMsgMap = new HashMap<>();
     private Ringtone ringtone;
 
     @Override
     public void onCreate() {
         super.onCreate();
-        serviceStartTime = System.currentTimeMillis();
         createChannels();
     }
 
@@ -70,11 +70,16 @@ public class WhatsAppBgService extends Service {
             return START_NOT_STICKY;
         }
 
+        Intent openApp = new Intent(this, MainActivity.class);
+        PendingIntent openPi = PendingIntent.getActivity(this, 1, openApp, PendingIntent.FLAG_IMMUTABLE);
+
         Notification bgNotif = new NotificationCompat.Builder(this, CH_SERVICE)
-                .setContentTitle("WhatsApp")
-                .setContentText("Connected for calls & messages")
+                .setContentTitle("WhatsApp Active")
+                .setContentText("Ready for incoming calls & messages")
                 .setSmallIcon(R.drawable.ic_chat)
+                .setContentIntent(openPi)
                 .setOngoing(true)
+                .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
                 .setPriority(NotificationCompat.PRIORITY_LOW)
                 .build();
 
@@ -118,7 +123,7 @@ public class WhatsAppBgService extends Service {
                     for (DocumentSnapshot d : snaps.getDocuments()) {
                         String status = d.getString("status");
                         Long createdAt = d.getLong("createdAt");
-                        boolean isFresh = createdAt == null || (System.currentTimeMillis() - createdAt) < 60000;
+                        boolean isFresh = createdAt == null || Math.abs(System.currentTimeMillis() - createdAt) < 180000;
                         if ("calling".equals(status) && isFresh) {
                             activeCall = d;
                             break;
@@ -127,6 +132,7 @@ public class WhatsAppBgService extends Service {
 
                     NotificationManager nm = getSystemService(NotificationManager.class);
                     if (activeCall != null && !ChatActivity.isChatOpen) {
+                        wakeCpuBriefly();
                         showIncomingCallNotification(activeCall);
                     } else {
                         stopRingtone();
@@ -135,9 +141,20 @@ public class WhatsAppBgService extends Service {
                 });
 
         if (chatListener != null) chatListener.remove();
+        chatsInitialized = false;
         chatListener = db.collection("chats").whereArrayContains("participants", myPhone)
                 .addSnapshotListener((snaps, err) -> {
-                    if (snaps == null || ChatActivity.isChatOpen) return;
+                    if (snaps == null) return;
+
+                    if (!chatsInitialized) {
+                        for (DocumentSnapshot d : snaps.getDocuments()) {
+                            Long lt = d.getLong("lastTimestamp");
+                            if (lt != null) lastNotifiedMsgMap.put(d.getId(), lt);
+                        }
+                        chatsInitialized = true;
+                        return;
+                    }
+
                     for (DocumentSnapshot d : snaps.getDocuments()) {
                         Long lastTime = d.getLong("lastTimestamp");
                         String lastMsg = d.getString("lastMessage");
@@ -146,22 +163,34 @@ public class WhatsAppBgService extends Service {
 
                         if (lastTime == null || lastMsg == null || myPhone.equals(lastSenderId)) continue;
                         Long prevTime = lastNotifiedMsgMap.get(d.getId());
-                        long baseline = prevTime != null ? prevTime : serviceStartTime;
 
-                        if (lastTime > baseline) {
+                        if (prevTime == null || !lastTime.equals(prevTime)) {
                             lastNotifiedMsgMap.put(d.getId(), lastTime);
-                            List<String> parts = (List<String>) d.get("participants");
-                            String peerPhone = lastSenderId;
-                            if (peerPhone == null && parts != null) {
-                                for (String p : parts) if (!myPhone.equals(p)) { peerPhone = p; break; }
-                            }
-                            if (peerPhone != null) {
-                                showMessageNotification(d.getId().hashCode(), peerPhone,
-                                        lastSenderName != null ? lastSenderName : peerPhone, lastMsg);
+                            if (!ChatActivity.isChatOpen) {
+                                wakeCpuBriefly();
+                                List<String> parts = (List<String>) d.get("participants");
+                                String peerPhone = lastSenderId;
+                                if (peerPhone == null && parts != null) {
+                                    for (String p : parts) if (!myPhone.equals(p)) { peerPhone = p; break; }
+                                }
+                                if (peerPhone != null) {
+                                    showMessageNotification(d.getId().hashCode(), peerPhone,
+                                            lastSenderName != null ? lastSenderName : peerPhone, lastMsg);
+                                }
                             }
                         }
                     }
                 });
+    }
+
+    private void wakeCpuBriefly() {
+        try {
+            PowerManager pm = (PowerManager) getSystemService(POWER_SERVICE);
+            if (pm != null) {
+                PowerManager.WakeLock wl = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "WhatsApp::WakeLock");
+                wl.acquire(10000L);
+            }
+        } catch (Exception ignored) {}
     }
 
     private void showIncomingCallNotification(DocumentSnapshot callDoc) {
@@ -227,34 +256,41 @@ public class WhatsAppBgService extends Service {
 
     private void playRingtone() {
         try {
-            if (ringtone == null) {
-                ringtone = RingtoneManager.getRingtone(this, RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE));
-            }
+            if (ringtone == null) ringtone = RingtoneManager.getRingtone(this, RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE));
             if (ringtone != null && !ringtone.isPlaying()) ringtone.play();
         } catch (Exception ignored) {}
     }
 
-    private void stopRingtone() {
-        try { if (ringtone != null && ringtone.isPlaying()) ringtone.stop(); } catch (Exception ignored) {}
-    }
+    private void stopRingtone() { try { if (ringtone != null && ringtone.isPlaying()) ringtone.stop(); } catch (Exception ignored) {} }
 
     private void createChannels() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             NotificationManager nm = getSystemService(NotificationManager.class);
             if (nm == null) return;
-
             NotificationChannel bgCh = new NotificationChannel(CH_SERVICE, "Background Connection", NotificationManager.IMPORTANCE_LOW);
             NotificationChannel msgCh = new NotificationChannel(CH_MESSAGES, "Messages", NotificationManager.IMPORTANCE_HIGH);
             msgCh.enableVibration(true);
-
             NotificationChannel callCh = new NotificationChannel(CH_CALLS, "Incoming Calls", NotificationManager.IMPORTANCE_HIGH);
             callCh.enableVibration(true);
-            Uri ringUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE);
-            callCh.setSound(ringUri, new AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_NOTIFICATION_RINGTONE).build());
-
+            callCh.setSound(RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE),
+                    new AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_NOTIFICATION_RINGTONE).build());
             nm.createNotificationChannel(bgCh);
             nm.createNotificationChannel(msgCh);
             nm.createNotificationChannel(callCh);
+        }
+    }
+
+    @Override
+    public void onTaskRemoved(Intent rootIntent) {
+        super.onTaskRemoved(rootIntent);
+        String phone = getSharedPreferences("DivineWA", MODE_PRIVATE).getString("my_phone", "");
+        if (!phone.isEmpty()) {
+            Intent restart = new Intent(getApplicationContext(), WhatsAppBgService.class);
+            PendingIntent pi = Build.VERSION.SDK_INT >= Build.VERSION_CODES.O
+                    ? PendingIntent.getForegroundService(getApplicationContext(), 99, restart, PendingIntent.FLAG_ONE_SHOT | PendingIntent.FLAG_IMMUTABLE)
+                    : PendingIntent.getService(getApplicationContext(), 99, restart, PendingIntent.FLAG_ONE_SHOT | PendingIntent.FLAG_IMMUTABLE);
+            AlarmManager am = (AlarmManager) getSystemService(ALARM_SERVICE);
+            if (am != null) am.set(AlarmManager.RTC_WAKEUP, System.currentTimeMillis() + 1500, pi);
         }
     }
 
@@ -266,7 +302,5 @@ public class WhatsAppBgService extends Service {
         if (chatListener != null) chatListener.remove();
     }
 
-    @Nullable
-    @Override
-    public IBinder onBind(Intent intent) { return null; }
+    @Nullable @Override public IBinder onBind(Intent intent) { return null; }
 }
