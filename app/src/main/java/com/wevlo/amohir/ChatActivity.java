@@ -507,4 +507,326 @@ public class ChatActivity extends AppCompatActivity {
                 if (w > h && w > max) { h = Math.round((float) h * max / w); w = max; }
                 else if (h > max) { w = Math.round((float) w * max / h); h = max; }
                 Bitmap res = Bitmap.createScaledBitmap(orig, w, h, true);
-                ByteArrayOutputStream baos = new B
+                ByteArrayOutputStream baos = new ByteArrayOutputStream();
+                res.compress(Bitmap.CompressFormat.JPEG, 50, baos);
+                String b64 = "data:image/jpeg;base64," + Base64.encodeToString(baos.toByteArray(), Base64.NO_WRAP);
+                runOnUiThread(() -> sendMessage("", "image", b64, null));
+            } catch (Exception ignored) {}
+        }).start();
+    }
+
+    private void showEmojiDialog() {
+        GridLayout grid = new GridLayout(this);
+        grid.setColumnCount(5); grid.setPadding(24, 24, 24, 24);
+        AlertDialog dialog = new AlertDialog.Builder(this).setTitle("Emoji").setView(grid).create();
+        for (String em : EMOJIS) {
+            TextView tv = new TextView(this);
+            tv.setText(em); tv.setTextSize(24); tv.setGravity(Gravity.CENTER); tv.setPadding(16, 16, 16, 16);
+            tv.setOnClickListener(v -> { etMessage.append(em); dialog.dismiss(); });
+            grid.addView(tv);
+        }
+        dialog.show();
+    }
+
+    private void initWebRTCViews() {
+        audioManager = (AudioManager) getSystemService(Context.AUDIO_SERVICE);
+        eglBase = EglBase.create();
+
+        remoteVideoView = findViewById(R.id.remoteVideoView);
+        remoteVideoView.init(eglBase.getEglBaseContext(), null);
+        remoteVideoView.setScalingType(RendererCommon.ScalingType.SCALE_ASPECT_FILL);
+        remoteVideoView.setEnableHardwareScaler(true);
+
+        localVideoView = findViewById(R.id.localVideoView);
+        localVideoView.init(eglBase.getEglBaseContext(), null);
+        localVideoView.setScalingType(RendererCommon.ScalingType.SCALE_ASPECT_FILL);
+        localVideoView.setMirror(true);
+        localVideoView.setZOrderMediaOverlay(true);
+        localVideoView.setOutlineProvider(new ViewOutlineProvider() {
+            @Override public void getOutline(View view, Outline outline) {
+                outline.setRoundRect(0, 0, view.getWidth(), view.getHeight(), dpToPx(16));
+            }
+        });
+        localVideoView.setClipToOutline(true);
+
+        webRTCManager = new WebRTCManager(this, eglBase, new WebRTCManager.Callback() {
+            @Override public void onIceCandidateGenerated(IceCandidate candidate) {
+                String col = isCallerCurrent ? "callerCandidates" : "calleeCandidates";
+                Map<String, Object> map = new HashMap<>();
+                map.put("candidate", candidate.sdp); map.put("sdpMid", candidate.sdpMid); map.put("sdpMLineIndex", candidate.sdpMLineIndex);
+                db.collection("calls").document(callDocId).collection(col).add(map);
+            }
+            @Override public void onRemoteStreamAdded(VideoTrack videoTrack) {
+                runOnUiThread(() -> videoTrack.addSink(remoteVideoView));
+            }
+            @Override public void onConnectionStateChanged(PeerConnection.PeerConnectionState state) {
+                runOnUiThread(() -> {
+                    if (state == PeerConnection.PeerConnectionState.CONNECTING) tvCallTimer.setText("Connecting...");
+                    else if (state == PeerConnection.PeerConnectionState.CONNECTED) startCallTimer();
+                    else if (state == PeerConnection.PeerConnectionState.FAILED) tvCallTimer.setText("Connection Failed");
+                    else if (state == PeerConnection.PeerConnectionState.DISCONNECTED) tvCallTimer.setText("Reconnecting...");
+                });
+            }
+            @Override public void onError(String message) {
+                runOnUiThread(() -> Toast.makeText(ChatActivity.this, message, Toast.LENGTH_SHORT).show());
+            }
+        });
+    }
+
+    @SuppressLint("ClickableViewAccessibility")
+    private void setupDraggableLocalView() {
+        localVideoView.setOnTouchListener(new View.OnTouchListener() {
+            float dX, dY;
+            @Override public boolean onTouch(View view, MotionEvent event) {
+                if (event.getAction() == MotionEvent.ACTION_DOWN) { dX = view.getX() - event.getRawX(); dY = view.getY() - event.getRawY(); return true; }
+                if (event.getAction() == MotionEvent.ACTION_MOVE) { view.setX(event.getRawX() + dX); view.setY(event.getRawY() + dY); return true; }
+                return false;
+            }
+        });
+    }
+
+    private void checkPermissionsAndStartCall(String type) {
+        boolean hasCam = ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED;
+        boolean hasMic = ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED;
+        if (!hasCam || !hasMic) {
+            pendingPermissionAction = () -> startCall(type);
+            permissionLauncher.launch(new String[]{Manifest.permission.CAMERA, Manifest.permission.RECORD_AUDIO});
+            return;
+        }
+        startCall(type);
+    }
+
+    @SuppressWarnings("unchecked")
+    private void startCall(String type) {
+        isCallerCurrent = true; activeCallType = type; hasRemoteSdp = false;
+        logCallHistory(type);
+        setupCallUI(type, tvChatName.getText().toString());
+
+        clearOldCandidates(() -> {
+            webRTCManager.startLocalMedia("video".equals(type), localVideoView);
+            webRTCManager.createPeerConnection();
+            webRTCManager.createOffer(offer -> {
+                Map<String, Object> offerMap = new HashMap<>();
+                offerMap.put("type", offer.type.canonicalForm()); offerMap.put("sdp", offer.description);
+
+                Map<String, Object> callData = new HashMap<>();
+                callData.put("callerId", myUid); callData.put("callerName", myName);
+                callData.put("receiverId", peerUid); callData.put("receiverName", tvChatName.getText().toString());
+                callData.put("type", type); callData.put("status", "calling");
+                callData.put("offer", offerMap); callData.put("createdAt", System.currentTimeMillis());
+
+                DocumentReference callDoc = db.collection("calls").document(callDocId);
+                callDoc.set(callData).addOnSuccessListener(unused -> runOnUiThread(() -> {
+                    if (callListener != null) callListener.remove();
+                    callListener = callDoc.addSnapshotListener((snap, err) -> {
+                        if (snap == null || !snap.exists()) return;
+                        String status = snap.getString("status");
+                        if ("connected".equals(status) && !hasRemoteSdp) {
+                            Map<String, Object> ans = (Map<String, Object>) snap.get("answer");
+                            if (ans != null) {
+                                hasRemoteSdp = true;
+                                webRTCManager.setRemoteDescription((String) ans.get("type"), (String) ans.get("sdp"), () ->
+                                        runOnUiThread(() -> tvCallTimer.setText("Connecting..."))
+                                );
+                            }
+                        } else if ("ended".equals(status)) hangupCall(false);
+                    });
+                    listenCandidates("calleeCandidates");
+                }));
+            });
+        });
+    }
+
+    private void listenIncomingCalls() {
+        incomingListener = db.collection("calls").document(callDocId).addSnapshotListener((snap, err) -> {
+            if (snap == null || !snap.exists()) return;
+            String status = snap.getString("status");
+            String callerId = snap.getString("callerId");
+            Long createdAt = snap.getLong("createdAt");
+            boolean isFresh = createdAt == null || (System.currentTimeMillis() - createdAt) < 60000;
+
+            if ("calling".equals(status) && isFresh && !myUid.equals(callerId)
+                    && callOverlay.getVisibility() != View.VISIBLE && !isAutoAccepting) {
+                incomingOverlay.setVisibility(View.VISIBLE);
+                tvCallerName.setText(snap.getString("callerName"));
+                tvCallType.setText("video".equals(snap.getString("type")) ? "WhatsApp video call" : "WhatsApp voice call");
+                playRingtone();
+                findViewById(R.id.btnAcceptCall).setOnClickListener(v -> acceptIncomingCallWithPermission(snap));
+                findViewById(R.id.btnRejectCall).setOnClickListener(v -> {
+                    stopRingtone(); incomingOverlay.setVisibility(View.GONE);
+                    snap.getReference().update("status", "ended");
+                });
+            } else if ("ended".equals(status)) {
+                stopRingtone(); isAutoAccepting = false; incomingOverlay.setVisibility(View.GONE);
+                if (callOverlay.getVisibility() == View.VISIBLE) hangupCall(false);
+            }
+        });
+    }
+
+    private void acceptIncomingCallWithPermission(DocumentSnapshot snap) {
+        boolean hasCam = ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED;
+        boolean hasMic = ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED;
+        if (!hasCam || !hasMic) {
+            pendingPermissionAction = () -> acceptIncomingCall(snap);
+            permissionLauncher.launch(new String[]{Manifest.permission.CAMERA, Manifest.permission.RECORD_AUDIO});
+            return;
+        }
+        acceptIncomingCall(snap);
+    }
+
+    @SuppressWarnings("unchecked")
+    private void acceptIncomingCall(DocumentSnapshot snap) {
+        stopRingtone();
+        NotificationManager nm = getSystemService(NotificationManager.class);
+        if (nm != null) nm.cancel(2002);
+
+        isAutoAccepting = false; incomingOverlay.setVisibility(View.GONE); isCallerCurrent = false;
+        activeCallType = snap.getString("type");
+        if (activeCallType == null) activeCallType = "video";
+
+        setupCallUI(activeCallType, snap.getString("callerName"));
+        webRTCManager.startLocalMedia("video".equals(activeCallType), localVideoView);
+        webRTCManager.createPeerConnection();
+
+        Map<String, Object> offer = (Map<String, Object>) snap.get("offer");
+        if (offer != null) {
+            webRTCManager.setRemoteDescription((String) offer.get("type"), (String) offer.get("sdp"), () ->
+                webRTCManager.createAnswer(answer -> {
+                    Map<String, Object> ansMap = new HashMap<>();
+                    ansMap.put("type", answer.type.canonicalForm()); ansMap.put("sdp", answer.description);
+                    Map<String, Object> updates = new HashMap<>();
+                    updates.put("answer", ansMap); updates.put("status", "connected");
+                    db.collection("calls").document(callDocId).update(updates).addOnSuccessListener(u ->
+                            runOnUiThread(() -> { listenCandidates("callerCandidates"); tvCallTimer.setText("Connecting..."); })
+                    );
+                })
+            );
+        }
+    }
+
+    private void listenCandidates(String subCol) {
+        if (candListener != null) candListener.remove();
+        candListener = db.collection("calls").document(callDocId).collection(subCol).addSnapshotListener((snaps, err) -> {
+            if (snaps == null) return;
+            for (DocumentChange dc : snaps.getDocumentChanges()) {
+                if (dc.getType() == DocumentChange.Type.ADDED) {
+                    String c = dc.getDocument().getString("candidate");
+                    String mid = dc.getDocument().getString("sdpMid");
+                    Object idxObj = dc.getDocument().get("sdpMLineIndex");
+                    int idx = idxObj instanceof Number ? ((Number) idxObj).intValue() : 0;
+                    if (c != null) webRTCManager.addIceCandidate(mid, idx, c);
+                }
+            }
+        });
+    }
+
+    private void clearOldCandidates(Runnable onDone) {
+        DocumentReference docRef = db.collection("calls").document(callDocId);
+        docRef.collection("callerCandidates").get().addOnSuccessListener(s1 -> {
+            for (DocumentSnapshot d : s1.getDocuments()) d.getReference().delete();
+            docRef.collection("calleeCandidates").get().addOnSuccessListener(s2 -> {
+                for (DocumentSnapshot d : s2.getDocuments()) d.getReference().delete();
+                onDone.run();
+            }).addOnFailureListener(e -> onDone.run());
+        }).addOnFailureListener(e -> onDone.run());
+    }
+
+    private void logCallHistory(String type) {
+        Map<String, Object> log = new HashMap<>();
+        log.put("callerId", myUid); log.put("callerName", myName);
+        log.put("receiverId", peerUid); log.put("receiverName", tvChatName.getText().toString());
+        log.put("participants", Arrays.asList(myUid, peerUid));
+        log.put("type", type); log.put("timestamp", System.currentTimeMillis());
+        db.collection("call_logs").add(log);
+    }
+
+    private void playRingtone() {
+        try {
+            if (ringtone == null) ringtone = RingtoneManager.getRingtone(this, RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE));
+            if (ringtone != null && !ringtone.isPlaying()) ringtone.play();
+        } catch (Exception ignored) {}
+    }
+
+    private void stopRingtone() { try { if (ringtone != null && ringtone.isPlaying()) ringtone.stop(); } catch (Exception ignored) {} }
+
+    private void setupCallUI(String type, String targetName) {
+        audioManager.setMode(AudioManager.MODE_IN_COMMUNICATION);
+        audioManager.setSpeakerphoneOn("video".equals(type));
+        isSpeakerOn = "video".equals(type); isMuted = false; isCamOff = false;
+        btnMic.setImageResource(R.drawable.ic_mic); btnMic.setAlpha(1.0f);
+        btnCam.setAlpha(1.0f); btnSpeaker.setAlpha(isSpeakerOn ? 1.0f : 0.45f);
+
+        minimizeCallUI(false);
+        callOverlay.setVisibility(View.VISIBLE);
+        tvActiveTarget.setText(targetName != null ? targetName : "Friend");
+        tvCallTimer.setText("Calling...");
+
+        boolean isVid = "video".equals(type);
+        localVideoView.setVisibility(isVid ? View.VISIBLE : View.GONE);
+        remoteVideoView.setVisibility(isVid ? View.VISIBLE : View.GONE);
+        audioCallAvatarBox.setVisibility(isVid ? View.GONE : View.VISIBLE);
+    }
+
+    private void minimizeCallUI(boolean minimize) {
+        FrameLayout.LayoutParams params = (FrameLayout.LayoutParams) callOverlay.getLayoutParams();
+        if (minimize) {
+            params.width = dpToPx(145); params.height = dpToPx(205);
+            params.gravity = Gravity.BOTTOM | Gravity.END;
+            params.setMargins(0, 0, dpToPx(16), dpToPx(80));
+            callTopBar.setVisibility(View.GONE); callBottomBar.setVisibility(View.GONE); btnMaximize.setVisibility(View.VISIBLE);
+        } else {
+            params.width = ViewGroup.LayoutParams.MATCH_PARENT; params.height = ViewGroup.LayoutParams.MATCH_PARENT;
+            params.gravity = Gravity.NO_GRAVITY; params.setMargins(0, 0, 0, 0);
+            callTopBar.setVisibility(View.VISIBLE); callBottomBar.setVisibility(View.VISIBLE); btnMaximize.setVisibility(View.GONE);
+        }
+        callOverlay.setLayoutParams(params);
+    }
+
+    private int dpToPx(int dp) { return Math.round(dp * getResources().getDisplayMetrics().density); }
+
+    private void startCallTimer() {
+        if (timerRunnable != null) return;
+        callStartTime = System.currentTimeMillis();
+        timerRunnable = new Runnable() {
+            @Override public void run() {
+                long sec = (System.currentTimeMillis() - callStartTime) / 1000;
+                tvCallTimer.setText(String.format(Locale.getDefault(), "%02d:%02d", sec / 60, sec % 60));
+                timerHandler.postDelayed(this, 1000);
+            }
+        };
+        timerHandler.post(timerRunnable);
+    }
+
+    private void hangupCall(boolean notifyFirebase) {
+        stopRingtone(); isAutoAccepting = false;
+        if (timerRunnable != null) { timerHandler.removeCallbacks(timerRunnable); timerRunnable = null; }
+        if (callListener != null) { callListener.remove(); callListener = null; }
+        if (candListener != null) { candListener.remove(); candListener = null; }
+        webRTCManager.endCall();
+        localVideoView.clearImage(); remoteVideoView.clearImage();
+        callOverlay.setVisibility(View.GONE);
+        audioManager.setMode(AudioManager.MODE_NORMAL);
+        if (notifyFirebase) db.collection("calls").document(callDocId).update("status", "ended");
+    }
+
+    @Override protected void onStart() { super.onStart(); isChatOpen = true; }
+    @Override protected void onStop() { super.onStop(); isChatOpen = false; }
+
+    @Override
+    protected void onDestroy() {
+        super.onDestroy();
+        stopRingtone();
+        if (callOverlay != null && callOverlay.getVisibility() == View.VISIBLE) hangupCall(true);
+        db.collection("users").document(myUid).update("typingTo", "");
+        if (msgListener != null) msgListener.remove();
+        if (peerListener != null) peerListener.remove();
+        if (incomingListener != null) incomingListener.remove();
+        if (recordRunnable != null) recordHandler.removeCallbacks(recordRunnable);
+        if (timerRunnable != null) timerHandler.removeCallbacks(timerRunnable);
+        if (adapter != null) adapter.releasePlayer();
+        if (webRTCManager != null) webRTCManager.destroyFactory();
+        if (localVideoView != null) localVideoView.release();
+        if (remoteVideoView != null) remoteVideoView.release();
+        if (eglBase != null) eglBase.release();
+    }
+}
