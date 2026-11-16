@@ -41,6 +41,7 @@ import android.widget.LinearLayout;
 import android.widget.TextView;
 import android.widget.Toast;
 
+import androidx.activity.OnBackPressedCallback;
 import androidx.activity.result.ActivityResultLauncher;
 import androidx.activity.result.contract.ActivityResultContracts;
 import androidx.annotation.NonNull;
@@ -221,6 +222,24 @@ public class ChatActivity extends AppCompatActivity {
             checkPermissionsAndStartCall(autoStartCall);
         }
         listenIncomingCalls();
+
+        // Back বাটনে চাপ দিলে কল না কেটে মিনিমাইজ বা ব্যাকগ্রাউন্ডে যাবে
+        getOnBackPressedDispatcher().addCallback(this, new OnBackPressedCallback(true) {
+            @Override
+            public void handleOnBackPressed() {
+                if (callOverlay != null && callOverlay.getVisibility() == View.VISIBLE) {
+                    if (callBottomBar != null && callBottomBar.getVisibility() == View.VISIBLE) {
+                        minimizeCallUI(true);
+                        Toast.makeText(ChatActivity.this, "Call minimized — tap Home to use other apps", Toast.LENGTH_SHORT).show();
+                    } else {
+                        moveTaskToBack(true);
+                    }
+                } else {
+                    setEnabled(false);
+                    getOnBackPressedDispatcher().onBackPressed();
+                }
+            }
+        });
     }
 
     private void initViews() {
@@ -376,9 +395,7 @@ public class ChatActivity extends AppCompatActivity {
 
     private void launchMyScreenSharePrompt() {
         MediaProjectionManager mpm = (MediaProjectionManager) getSystemService(Context.MEDIA_PROJECTION_SERVICE);
-        if (mpm != null) {
-            screenShareLauncher.launch(mpm.createScreenCaptureIntent());
-        }
+        if (mpm != null) screenShareLauncher.launch(mpm.createScreenCaptureIntent());
     }
 
     private void handleRemoteScreenRequest(DocumentSnapshot snap) {
