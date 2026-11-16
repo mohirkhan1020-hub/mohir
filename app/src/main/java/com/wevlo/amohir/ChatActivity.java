@@ -14,8 +14,10 @@ import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.Color;
 import android.graphics.Outline;
+import android.media.AudioAttributes;
 import android.media.AudioDeviceCallback;
 import android.media.AudioDeviceInfo;
+import android.media.AudioFocusRequest;
 import android.media.AudioManager;
 import android.media.MediaRecorder;
 import android.media.Ringtone;
@@ -120,11 +122,13 @@ public class ChatActivity extends AppCompatActivity {
     private EglBase eglBase;
     private WebRTCManager webRTCManager;
     private AudioManager audioManager;
+    private AudioFocusRequest audioFocusRequest;
     private AudioDeviceCallback audioDeviceCallback;
     private Ringtone ringtone;
 
     private String activeCallType = "video";
-    private boolean isMuted = false, isCamOff = false, isSpeakerOn = false, userForcedSpeaker = false;
+    private String selectedAudioRoute = "auto"; // auto, bluetooth, speaker, earpiece
+    private boolean isMuted = false, isCamOff = false;
     private boolean hasRemoteSdp = false, isCallerCurrent = false, isAutoAccepting = false;
     private long callStartTime = 0, lastScreenReqTime = 0;
     private final Handler timerHandler = new Handler(Looper.getMainLooper());
@@ -358,49 +362,110 @@ public class ChatActivity extends AppCompatActivity {
             if (webRTCManager != null) webRTCManager.setCamEnabled(!isCamOff);
             btnCam.setAlpha(isCamOff ? 0.45f : 1.0f);
         });
-        btnSpeaker.setOnClickListener(v -> {
-            userForcedSpeaker = !isSpeakerOn;
-            routeAudioForCall();
-        });
+        btnSpeaker.setOnClickListener(v -> showAudioOutputChooserOrToggle());
     }
 
-    /* 🎧 স্মার্ট Bluetooth + Headphone + Speaker অডিও রাউটিং */
+    /* 🎧 WhatsApp-এর মতো Bluetooth / Speaker / Earpiece অডিও সিস্টেম */
+    private boolean isBluetoothConnected() {
+        if (audioManager == null) return false;
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            for (AudioDeviceInfo dev : audioManager.getAvailableCommunicationDevices()) {
+                int t = dev.getType();
+                if (t == AudioDeviceInfo.TYPE_BLE_HEADSET || t == AudioDeviceInfo.TYPE_BLUETOOTH_SCO) return true;
+            }
+        }
+        for (AudioDeviceInfo dev : audioManager.getDevices(AudioManager.GET_DEVICES_OUTPUTS)) {
+            int t = dev.getType();
+            if (t == AudioDeviceInfo.TYPE_BLUETOOTH_SCO || t == AudioDeviceInfo.TYPE_BLUETOOTH_A2DP) return true;
+        }
+        return false;
+    }
+
+    private void showAudioOutputChooserOrToggle() {
+        if (isBluetoothConnected()) {
+            String[] opts = {"🎧 Bluetooth", "🔊 Speaker", "📱 Phone (Earpiece)"};
+            new AlertDialog.Builder(this)
+                    .setTitle("Audio Output")
+                    .setItems(opts, (d, which) -> {
+                        if (which == 0) selectedAudioRoute = "bluetooth";
+                        else if (which == 1) selectedAudioRoute = "speaker";
+                        else selectedAudioRoute = "earpiece";
+                        routeAudioForCall();
+                    }).show();
+        } else {
+            selectedAudioRoute = "speaker".equals(selectedAudioRoute) ? "earpiece" : "speaker";
+            routeAudioForCall();
+        }
+    }
+
+    @SuppressWarnings("deprecation")
+    private void requestVoiceAudioFocus() {
+        if (audioManager == null) return;
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            if (audioFocusRequest == null) {
+                AudioAttributes attrs = new AudioAttributes.Builder()
+                        .setUsage(AudioAttributes.USAGE_VOICE_COMMUNICATION)
+                        .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+                        .build();
+                audioFocusRequest = new AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT)
+                        .setAudioAttributes(attrs)
+                        .setAcceptsDelayedFocusGain(true)
+                        .setOnAudioFocusChangeListener(fc -> {})
+                        .build();
+            }
+            audioManager.requestAudioFocus(audioFocusRequest);
+        } else {
+            audioManager.requestAudioFocus(null, AudioManager.STREAM_VOICE_CALL, AudioManager.AUDIOFOCUS_GAIN_TRANSIENT);
+        }
+    }
+
     @SuppressWarnings("deprecation")
     private void routeAudioForCall() {
         if (audioManager == null) return;
+        requestVoiceAudioFocus();
         audioManager.setMode(AudioManager.MODE_IN_COMMUNICATION);
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            if (ContextCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED
+                    && isBluetoothConnected()) {
+                Toast.makeText(this, "Bluetooth কলের জন্য 'Nearby devices' পারমিশন দিন", Toast.LENGTH_SHORT).show();
+            }
+
             AudioDeviceInfo bt = null, wired = null, speaker = null, earpiece = null;
             for (AudioDeviceInfo dev : audioManager.getAvailableCommunicationDevices()) {
                 int type = dev.getType();
-                if (type == AudioDeviceInfo.TYPE_BLE_HEADSET || type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO) {
-                    bt = dev;
-                } else if (type == AudioDeviceInfo.TYPE_WIRED_HEADSET || type == AudioDeviceInfo.TYPE_WIRED_HEADPHONES || type == AudioDeviceInfo.TYPE_USB_HEADSET) {
-                    wired = dev;
-                } else if (type == AudioDeviceInfo.TYPE_BUILTIN_SPEAKER) {
-                    speaker = dev;
-                } else if (type == AudioDeviceInfo.TYPE_BUILTIN_EARPIECE) {
-                    earpiece = dev;
-                }
+                if (type == AudioDeviceInfo.TYPE_BLE_HEADSET || type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO) bt = dev;
+                else if (type == AudioDeviceInfo.TYPE_WIRED_HEADSET || type == AudioDeviceInfo.TYPE_WIRED_HEADPHONES || type == AudioDeviceInfo.TYPE_USB_HEADSET) wired = dev;
+                else if (type == AudioDeviceInfo.TYPE_BUILTIN_SPEAKER) speaker = dev;
+                else if (type == AudioDeviceInfo.TYPE_BUILTIN_EARPIECE) earpiece = dev;
             }
 
-            if (userForcedSpeaker && speaker != null) {
-                audioManager.setCommunicationDevice(speaker);
-                isSpeakerOn = true;
+            AudioDeviceInfo target = null;
+            String activeLabel = "earpiece";
+            if ("speaker".equals(selectedAudioRoute) && speaker != null) {
+                target = speaker; activeLabel = "speaker";
+            } else if ("earpiece".equals(selectedAudioRoute) && earpiece != null) {
+                target = earpiece; activeLabel = "earpiece";
+            } else if ("bluetooth".equals(selectedAudioRoute) && bt != null) {
+                target = bt; activeLabel = "bluetooth";
             } else if (bt != null) {
-                audioManager.setCommunicationDevice(bt);
-                isSpeakerOn = false;
+                target = bt; activeLabel = "bluetooth";
             } else if (wired != null) {
-                audioManager.setCommunicationDevice(wired);
-                isSpeakerOn = false;
+                target = wired; activeLabel = "wired";
             } else if ("video".equals(activeCallType) && speaker != null) {
-                audioManager.setCommunicationDevice(speaker);
-                isSpeakerOn = true;
+                target = speaker; activeLabel = "speaker";
             } else if (earpiece != null) {
-                audioManager.setCommunicationDevice(earpiece);
-                isSpeakerOn = false;
+                target = earpiece; activeLabel = "earpiece";
             }
+
+            if (target != null) {
+                boolean ok = audioManager.setCommunicationDevice(target);
+                if (!ok && "bluetooth".equals(activeLabel)) {
+                    audioManager.startBluetoothSco();
+                    audioManager.setBluetoothScoOn(true);
+                }
+            }
+            updateSpeakerIcon(activeLabel);
         } else {
             boolean hasBt = false, hasWired = false;
             for (AudioDeviceInfo dev : audioManager.getDevices(AudioManager.GET_DEVICES_OUTPUTS)) {
@@ -409,29 +474,48 @@ public class ChatActivity extends AppCompatActivity {
                 if (type == AudioDeviceInfo.TYPE_WIRED_HEADSET || type == AudioDeviceInfo.TYPE_WIRED_HEADPHONES) hasWired = true;
             }
 
-            if (userForcedSpeaker) {
-                audioManager.stopBluetoothSco();
-                audioManager.setBluetoothScoOn(false);
-                audioManager.setSpeakerphoneOn(true);
-                isSpeakerOn = true;
-            } else if (hasBt) {
+            String activeLabel;
+            if ("speaker".equals(selectedAudioRoute)) {
+                audioManager.stopBluetoothSco(); audioManager.setBluetoothScoOn(false);
+                audioManager.setSpeakerphoneOn(true); activeLabel = "speaker";
+            } else if ("earpiece".equals(selectedAudioRoute)) {
+                audioManager.stopBluetoothSco(); audioManager.setBluetoothScoOn(false);
+                audioManager.setSpeakerphoneOn(false); activeLabel = "earpiece";
+            } else if ("bluetooth".equals(selectedAudioRoute) || ("auto".equals(selectedAudioRoute) && hasBt)) {
                 audioManager.setSpeakerphoneOn(false);
                 audioManager.startBluetoothSco();
                 audioManager.setBluetoothScoOn(true);
-                isSpeakerOn = false;
+                activeLabel = "bluetooth";
             } else if (hasWired) {
-                audioManager.stopBluetoothSco();
-                audioManager.setBluetoothScoOn(false);
-                audioManager.setSpeakerphoneOn(false);
-                isSpeakerOn = false;
+                audioManager.stopBluetoothSco(); audioManager.setBluetoothScoOn(false);
+                audioManager.setSpeakerphoneOn(false); activeLabel = "wired";
+            } else if ("video".equals(activeCallType)) {
+                audioManager.stopBluetoothSco(); audioManager.setBluetoothScoOn(false);
+                audioManager.setSpeakerphoneOn(true); activeLabel = "speaker";
             } else {
-                audioManager.stopBluetoothSco();
-                audioManager.setBluetoothScoOn(false);
-                isSpeakerOn = "video".equals(activeCallType);
-                audioManager.setSpeakerphoneOn(isSpeakerOn);
+                audioManager.stopBluetoothSco(); audioManager.setBluetoothScoOn(false);
+                audioManager.setSpeakerphoneOn(false); activeLabel = "earpiece";
             }
+            updateSpeakerIcon(activeLabel);
         }
-        btnSpeaker.setAlpha(isSpeakerOn ? 1.0f : 0.45f);
+    }
+
+    private void updateSpeakerIcon(String activeLabel) {
+        if ("bluetooth".equals(activeLabel)) {
+            btnSpeaker.setColorFilter(Color.parseColor("#53BDEB"));
+            btnSpeaker.setAlpha(1.0f);
+        } else if ("speaker".equals(activeLabel)) {
+            btnSpeaker.setColorFilter(Color.parseColor("#25D366"));
+            btnSpeaker.setAlpha(1.0f);
+        } else {
+            btnSpeaker.clearColorFilter();
+            btnSpeaker.setAlpha(0.55f);
+        }
+    }
+
+    private void scheduleBluetoothRouteRetries() {
+        timerHandler.postDelayed(() -> { if (callOverlay.getVisibility() == View.VISIBLE) routeAudioForCall(); }, 500);
+        timerHandler.postDelayed(() -> { if (callOverlay.getVisibility() == View.VISIBLE) routeAudioForCall(); }, 1500);
     }
 
     private void registerBluetoothListener() {
@@ -439,7 +523,7 @@ public class ChatActivity extends AppCompatActivity {
         audioDeviceCallback = new AudioDeviceCallback() {
             @Override public void onAudioDevicesAdded(AudioDeviceInfo[] addedDevices) {
                 if (callOverlay.getVisibility() == View.VISIBLE) {
-                    userForcedSpeaker = false;
+                    selectedAudioRoute = "auto";
                     routeAudioForCall();
                 }
             }
@@ -463,6 +547,10 @@ public class ChatActivity extends AppCompatActivity {
             audioManager.stopBluetoothSco();
             audioManager.setBluetoothScoOn(false);
             audioManager.setSpeakerphoneOn(false);
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && audioFocusRequest != null) {
+            audioManager.abandonAudioFocusRequest(audioFocusRequest);
+            audioFocusRequest = null;
         }
         audioManager.setMode(AudioManager.MODE_NORMAL);
     }
@@ -753,6 +841,7 @@ public class ChatActivity extends AppCompatActivity {
                         cancelCallTimeout();
                         if ("video".equals(activeCallType)) setLocalVideoFullscreen(false);
                         routeAudioForCall();
+                        scheduleBluetoothRouteRetries();
                         startCallTimer();
                     } else if (state == PeerConnection.PeerConnectionState.FAILED) tvCallTimer.setText("Connection Failed");
                     else if (state == PeerConnection.PeerConnectionState.DISCONNECTED) tvCallTimer.setText("Reconnecting...");
@@ -841,6 +930,7 @@ public class ChatActivity extends AppCompatActivity {
         clearOldCandidates(() -> {
             webRTCManager.startLocalMedia("video".equals(type), localVideoView);
             webRTCManager.createPeerConnection();
+            scheduleBluetoothRouteRetries();
             webRTCManager.createOffer(offer -> {
                 Map<String, Object> offerMap = new HashMap<>();
                 offerMap.put("type", offer.type.canonicalForm()); offerMap.put("sdp", offer.description);
@@ -922,6 +1012,7 @@ public class ChatActivity extends AppCompatActivity {
         setupCallUI(activeCallType, snap.getString("callerName"), false);
         webRTCManager.startLocalMedia("video".equals(activeCallType), localVideoView);
         webRTCManager.createPeerConnection();
+        scheduleBluetoothRouteRetries();
 
         Map<String, Object> offer = (Map<String, Object>) snap.get("offer");
         if (offer != null) {
@@ -985,7 +1076,7 @@ public class ChatActivity extends AppCompatActivity {
     private void stopRingtone() { try { if (ringtone != null && ringtone.isPlaying()) ringtone.stop(); } catch (Exception ignored) {} }
 
     private void setupCallUI(String type, String targetName, boolean isOutgoing) {
-        userForcedSpeaker = false;
+        selectedAudioRoute = "auto";
         isMuted = false; isCamOff = false;
         btnMic.setImageResource(R.drawable.ic_mic); btnMic.setAlpha(1.0f);
         btnCam.setAlpha(1.0f);
@@ -998,6 +1089,7 @@ public class ChatActivity extends AppCompatActivity {
 
         registerBluetoothListener();
         routeAudioForCall();
+        scheduleBluetoothRouteRetries();
 
         boolean isVid = "video".equals(type);
         localVideoView.setVisibility(isVid ? View.VISIBLE : View.GONE);
