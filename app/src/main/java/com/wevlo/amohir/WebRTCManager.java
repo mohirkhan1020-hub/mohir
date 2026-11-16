@@ -52,9 +52,7 @@ public class WebRTCManager {
         void onError(String message);
     }
 
-    public interface SdpResultListener {
-        void onSuccess(SessionDescription sdp);
-    }
+    public interface SdpResultListener { void onSuccess(SessionDescription sdp); }
 
     private final Context context;
     private final EglBase eglBase;
@@ -68,7 +66,7 @@ public class WebRTCManager {
     private AudioTrack localAudioTrack;
 
     private VideoSource videoSource;
-    private VideoTrack localVideoTrack;
+    private VideoTrack localVideoTrack, remoteVideoTrack;
     private CameraVideoCapturer videoCapturer;
     private SurfaceTextureHelper surfaceTextureHelper;
 
@@ -76,11 +74,10 @@ public class WebRTCManager {
     private SurfaceTextureHelper screenSurfaceHelper;
     private VideoSource screenVideoSource;
     private VideoTrack screenVideoTrack;
-    private boolean isScreenSharing = false;
+    private boolean isScreenSharing = false, isSwapped = false, isFrontCamera = true;
 
-    private SurfaceViewRenderer localViewRef;
-    private boolean isVideoCall = true;
-    private boolean isRemoteSdpSet = false;
+    private SurfaceViewRenderer localViewRef, remoteViewRef;
+    private boolean isVideoCall = true, isRemoteSdpSet = false;
     private final List<IceCandidate> pendingIceCandidates = new ArrayList<>();
     private final Object iceLock = new Object();
 
@@ -88,16 +85,9 @@ public class WebRTCManager {
         this.context = context.getApplicationContext();
         this.eglBase = eglBase;
         this.callback = callback;
-
-        PeerConnectionFactory.initialize(
-                PeerConnectionFactory.InitializationOptions.builder(this.context).createInitializationOptions()
-        );
-
+        PeerConnectionFactory.initialize(PeerConnectionFactory.InitializationOptions.builder(this.context).createInitializationOptions());
         audioDeviceModule = JavaAudioDeviceModule.builder(this.context)
-                .setUseHardwareAcousticEchoCanceler(true)
-                .setUseHardwareNoiseSuppressor(true)
-                .createAudioDeviceModule();
-
+                .setUseHardwareAcousticEchoCanceler(true).setUseHardwareNoiseSuppressor(true).createAudioDeviceModule();
         factory = PeerConnectionFactory.builder()
                 .setAudioDeviceModule(audioDeviceModule)
                 .setVideoEncoderFactory(new DefaultVideoEncoderFactory(eglBase.getEglBaseContext(), true, true))
@@ -105,61 +95,81 @@ public class WebRTCManager {
                 .createPeerConnectionFactory();
     }
 
-    public void startLocalMedia(boolean isVideo, SurfaceViewRenderer localView) {
+    public void startLocalMedia(boolean isVideo, SurfaceViewRenderer localView, SurfaceViewRenderer remoteView) {
         this.isVideoCall = isVideo;
         this.localViewRef = localView;
+        this.remoteViewRef = remoteView;
 
         MediaConstraints audioConstraints = new MediaConstraints();
         audioConstraints.mandatory.add(new MediaConstraints.KeyValuePair("googEchoCancellation", "true"));
         audioConstraints.mandatory.add(new MediaConstraints.KeyValuePair("googNoiseSuppression", "true"));
         audioConstraints.mandatory.add(new MediaConstraints.KeyValuePair("googAutoGainControl", "true"));
-
         audioSource = factory.createAudioSource(audioConstraints);
         localAudioTrack = factory.createAudioTrack("ARDAMSa0", audioSource);
         localAudioTrack.setEnabled(true);
 
-        if (isVideo) startCameraInternal(localView);
+        if (isVideo) startCameraInternal();
     }
 
-    private void startCameraInternal(SurfaceViewRenderer localView) {
+    private void startCameraInternal() {
         videoCapturer = createCameraCapturer();
         if (videoCapturer != null) {
             surfaceTextureHelper = SurfaceTextureHelper.create("CaptureThread", eglBase.getEglBaseContext());
             videoSource = factory.createVideoSource(false);
             videoCapturer.initialize(surfaceTextureHelper, context, videoSource.getCapturerObserver());
-            try {
-                videoCapturer.startCapture(960, 540, 24);
-            } catch (Exception e) {
-                try { videoCapturer.startCapture(640, 480, 24); } catch (Exception ignored) {}
-            }
-            if (localView != null) localView.setMirror(true);
+            try { videoCapturer.startCapture(960, 540, 24); }
+            catch (Exception e) { try { videoCapturer.startCapture(640, 480, 24); } catch (Exception ignored) {} }
+            isFrontCamera = true;
             localVideoTrack = factory.createVideoTrack("ARDAMSv0", videoSource);
             localVideoTrack.setEnabled(true);
-            if (localView != null) localVideoTrack.addSink(localView);
+            refreshVideoSinks();
+        }
+    }
+
+    public void setRemoteVideoTrack(VideoTrack track) {
+        this.remoteVideoTrack = track;
+        refreshVideoSinks();
+    }
+
+    public void swapVideoViews() {
+        if (remoteVideoTrack == null || (localVideoTrack == null && screenVideoTrack == null)) return;
+        isSwapped = !isSwapped;
+        refreshVideoSinks();
+    }
+
+    private void refreshVideoSinks() {
+        VideoTrack activeLocal = isScreenSharing ? screenVideoTrack : localVideoTrack;
+        if (activeLocal != null) {
+            if (localViewRef != null) activeLocal.removeSink(localViewRef);
+            if (remoteViewRef != null) activeLocal.removeSink(remoteViewRef);
+        }
+        if (remoteVideoTrack != null) {
+            if (localViewRef != null) remoteVideoTrack.removeSink(localViewRef);
+            if (remoteViewRef != null) remoteVideoTrack.removeSink(remoteViewRef);
+        }
+
+        if (isSwapped && remoteVideoTrack != null && activeLocal != null) {
+            if (remoteViewRef != null) { remoteViewRef.setMirror(!isScreenSharing && isFrontCamera); activeLocal.addSink(remoteViewRef); }
+            if (localViewRef != null) { localViewRef.setMirror(false); remoteVideoTrack.addSink(localViewRef); }
+        } else {
+            if (localViewRef != null && activeLocal != null) { localViewRef.setMirror(!isScreenSharing && isFrontCamera); activeLocal.addSink(localViewRef); }
+            if (remoteViewRef != null && remoteVideoTrack != null) { remoteViewRef.setMirror(false); remoteVideoTrack.addSink(remoteViewRef); }
         }
     }
 
     private CameraVideoCapturer createCameraCapturer() {
-        CameraEnumerator enumerator = Camera2Enumerator.isSupported(context)
-                ? new Camera2Enumerator(context) : new Camera1Enumerator(true);
-        for (String name : enumerator.getDeviceNames()) {
-            if (enumerator.isFrontFacing(name)) {
-                CameraVideoCapturer c = enumerator.createCapturer(name, null);
-                if (c != null) return c;
-            }
+        CameraEnumerator enumerator = Camera2Enumerator.isSupported(context) ? new Camera2Enumerator(context) : new Camera1Enumerator(true);
+        for (String name : enumerator.getDeviceNames()) if (enumerator.isFrontFacing(name)) {
+            CameraVideoCapturer c = enumerator.createCapturer(name, null); if (c != null) return c;
         }
-        for (String name : enumerator.getDeviceNames()) {
-            if (!enumerator.isFrontFacing(name)) {
-                CameraVideoCapturer c = enumerator.createCapturer(name, null);
-                if (c != null) return c;
-            }
+        for (String name : enumerator.getDeviceNames()) if (!enumerator.isFrontFacing(name)) {
+            CameraVideoCapturer c = enumerator.createCapturer(name, null); if (c != null) return c;
         }
         return null;
     }
 
     public void createPeerConnection() {
         synchronized (iceLock) { isRemoteSdpSet = false; pendingIceCandidates.clear(); }
-
         List<PeerConnection.IceServer> iceServers = new ArrayList<>();
         iceServers.add(PeerConnection.IceServer.builder("stun:stun.l.google.com:19302").createIceServer());
         iceServers.add(PeerConnection.IceServer.builder("stun:stun1.l.google.com:19302").createIceServer());
@@ -181,11 +191,10 @@ public class WebRTCManager {
                 if (track instanceof VideoTrack) callback.onRemoteStreamAdded((VideoTrack) track);
             }
             @Override public void onIceConnectionChange(PeerConnection.IceConnectionState newState) {
-                if (newState == PeerConnection.IceConnectionState.CONNECTED || newState == PeerConnection.IceConnectionState.COMPLETED) {
+                if (newState == PeerConnection.IceConnectionState.CONNECTED || newState == PeerConnection.IceConnectionState.COMPLETED)
                     callback.onConnectionStateChanged(PeerConnection.PeerConnectionState.CONNECTED);
-                } else if (newState == PeerConnection.IceConnectionState.FAILED) {
+                else if (newState == PeerConnection.IceConnectionState.FAILED)
                     callback.onConnectionStateChanged(PeerConnection.PeerConnectionState.FAILED);
-                }
             }
             @Override public void onConnectionChange(PeerConnection.PeerConnectionState newState) { callback.onConnectionStateChanged(newState); }
             @Override public void onSignalingChange(PeerConnection.SignalingState s) {}
@@ -202,10 +211,7 @@ public class WebRTCManager {
         if (peerConnection != null) {
             List<String> streamIds = Collections.singletonList("ARDAMS");
             if (localAudioTrack != null) peerConnection.addTrack(localAudioTrack, streamIds);
-            if (localVideoTrack != null) {
-                videoSender = peerConnection.addTrack(localVideoTrack, streamIds);
-                applySmoothVideoParams(false);
-            }
+            if (localVideoTrack != null) { videoSender = peerConnection.addTrack(localVideoTrack, streamIds); applySmoothVideoParams(false); }
         }
     }
 
@@ -217,74 +223,55 @@ public class WebRTCManager {
             enc.minBitrateBps = 80_000;
             enc.maxFramerate = screenMode ? 15 : 24;
         }
-        params.degradationPreference = screenMode
-                ? RtpParameters.DegradationPreference.MAINTAIN_RESOLUTION
-                : RtpParameters.DegradationPreference.MAINTAIN_FRAMERATE;
+        params.degradationPreference = screenMode ? RtpParameters.DegradationPreference.MAINTAIN_RESOLUTION : RtpParameters.DegradationPreference.MAINTAIN_FRAMERATE;
         videoSender.setParameters(params);
     }
 
     public boolean isScreenSharing() { return isScreenSharing; }
 
-    public void startScreenShare(Intent projectionData, SurfaceViewRenderer localView) {
-        if (videoSender == null || projectionData == null) {
-            callback.onError("Please use Video Call for Screen Share");
-            return;
-        }
+    public void startScreenShare(Intent projectionData) {
+        if (videoSender == null || projectionData == null) { callback.onError("Please use Video Call for Screen Share"); return; }
         stopCameraResources();
         isScreenSharing = true;
-
         screenCapturer = new ScreenCapturerAndroid(projectionData, new MediaProjection.Callback() {
-            @Override public void onStop() {
-                if (isScreenSharing) {
-                    stopScreenShare(localView);
-                    callback.onScreenShareStopped();
-                }
-            }
+            @Override public void onStop() { if (isScreenSharing) { stopScreenShare(); callback.onScreenShareStopped(); } }
         });
         screenSurfaceHelper = SurfaceTextureHelper.create("ScreenThread", eglBase.getEglBaseContext());
         screenVideoSource = factory.createVideoSource(true);
         screenCapturer.initialize(screenSurfaceHelper, context, screenVideoSource.getCapturerObserver());
         screenCapturer.startCapture(720, 1280, 15);
-
         screenVideoTrack = factory.createVideoTrack("ARDAMSs0", screenVideoSource);
         screenVideoTrack.setEnabled(true);
-        if (localView != null) {
-            localView.setMirror(false);
-            screenVideoTrack.addSink(localView);
-        }
+        refreshVideoSinks();
         videoSender.setTrack(screenVideoTrack, false);
         applySmoothVideoParams(true);
     }
 
-    public void stopScreenShare(SurfaceViewRenderer localView) {
+    public void stopScreenShare() {
         if (!isScreenSharing) return;
         isScreenSharing = false;
         stopScreenResources();
-
-        startCameraInternal(localView);
-        if (videoSender != null && localVideoTrack != null) {
-            videoSender.setTrack(localVideoTrack, false);
-            applySmoothVideoParams(false);
-        }
+        startCameraInternal();
+        if (videoSender != null && localVideoTrack != null) { videoSender.setTrack(localVideoTrack, false); applySmoothVideoParams(false); }
     }
 
     private void stopCameraResources() {
-        if (localVideoTrack != null && localViewRef != null) localVideoTrack.removeSink(localViewRef);
-        if (videoCapturer != null) {
-            try { videoCapturer.stopCapture(); } catch (InterruptedException ignored) {}
-            videoCapturer.dispose(); videoCapturer = null;
+        if (localVideoTrack != null) {
+            if (localViewRef != null) localVideoTrack.removeSink(localViewRef);
+            if (remoteViewRef != null) localVideoTrack.removeSink(remoteViewRef);
         }
+        if (videoCapturer != null) { try { videoCapturer.stopCapture(); } catch (InterruptedException ignored) {} videoCapturer.dispose(); videoCapturer = null; }
         if (surfaceTextureHelper != null) { surfaceTextureHelper.dispose(); surfaceTextureHelper = null; }
         if (videoSource != null) { videoSource.dispose(); videoSource = null; }
         localVideoTrack = null;
     }
 
     private void stopScreenResources() {
-        if (screenVideoTrack != null && localViewRef != null) screenVideoTrack.removeSink(localViewRef);
-        if (screenCapturer != null) {
-            try { screenCapturer.stopCapture(); } catch (InterruptedException ignored) {}
-            screenCapturer.dispose(); screenCapturer = null;
+        if (screenVideoTrack != null) {
+            if (localViewRef != null) screenVideoTrack.removeSink(localViewRef);
+            if (remoteViewRef != null) screenVideoTrack.removeSink(remoteViewRef);
         }
+        if (screenCapturer != null) { try { screenCapturer.stopCapture(); } catch (InterruptedException ignored) {} screenCapturer.dispose(); screenCapturer = null; }
         if (screenSurfaceHelper != null) { screenSurfaceHelper.dispose(); screenSurfaceHelper = null; }
         if (screenVideoSource != null) { screenVideoSource.dispose(); screenVideoSource = null; }
         screenVideoTrack = null;
@@ -341,42 +328,33 @@ public class WebRTCManager {
     public void addIceCandidate(String sdpMid, int sdpMLineIndex, String candidate) {
         if (peerConnection == null || candidate == null) return;
         IceCandidate ice = new IceCandidate(sdpMid, sdpMLineIndex, candidate);
-        synchronized (iceLock) {
-            if (isRemoteSdpSet) peerConnection.addIceCandidate(ice);
-            else pendingIceCandidates.add(ice);
-        }
+        synchronized (iceLock) { if (isRemoteSdpSet) peerConnection.addIceCandidate(ice); else pendingIceCandidates.add(ice); }
     }
 
     public void setMicEnabled(boolean enabled) { if (localAudioTrack != null) localAudioTrack.setEnabled(enabled); }
     public void setCamEnabled(boolean enabled) { if (localVideoTrack != null) localVideoTrack.setEnabled(enabled); }
 
     public void switchCamera() {
-        if (isScreenSharing) return;
-        if (videoCapturer != null) {
-            videoCapturer.switchCamera(new CameraVideoCapturer.CameraSwitchHandler() {
-                @Override public void onCameraSwitchDone(boolean isFrontCamera) {
-                    if (localViewRef != null) localViewRef.post(() -> localViewRef.setMirror(isFrontCamera));
-                }
-                @Override public void onCameraSwitchError(String s) {}
-            });
-        }
+        if (isScreenSharing || videoCapturer == null) return;
+        videoCapturer.switchCamera(new CameraVideoCapturer.CameraSwitchHandler() {
+            @Override public void onCameraSwitchDone(boolean front) {
+                isFrontCamera = front;
+                if (localViewRef != null) localViewRef.post(() -> refreshVideoSinks());
+            }
+            @Override public void onCameraSwitchError(String s) {}
+        });
     }
 
     public void endCall() {
         synchronized (iceLock) { isRemoteSdpSet = false; pendingIceCandidates.clear(); }
-        isScreenSharing = false;
-        stopCameraResources();
-        stopScreenResources();
+        isScreenSharing = false; isSwapped = false; remoteVideoTrack = null;
+        stopCameraResources(); stopScreenResources();
         if (audioSource != null) { audioSource.dispose(); audioSource = null; }
         if (peerConnection != null) { peerConnection.close(); peerConnection = null; }
-        videoSender = null; localAudioTrack = null; localViewRef = null;
+        videoSender = null; localAudioTrack = null; localViewRef = null; remoteViewRef = null;
     }
 
-    public void destroyFactory() {
-        endCall();
-        factory.dispose();
-        if (audioDeviceModule != null) audioDeviceModule.release();
-    }
+    public void destroyFactory() { endCall(); factory.dispose(); if (audioDeviceModule != null) audioDeviceModule.release(); }
 
     private static class SimpleSdpObserver implements SdpObserver {
         @Override public void onCreateSuccess(SessionDescription sdp) {}
